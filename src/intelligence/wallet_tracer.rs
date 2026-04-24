@@ -1,10 +1,11 @@
+use crate::intelligence::bridge_corpus::{bridge_label_for, BridgeCorpusState};
 use crate::intelligence::history::{fetch_address_transactions, HistoricalTransaction};
+use crate::tracking::cex_surveillance::CexWalletMetadata;
+use crate::tracking::mixer_detector::{mixer_label_for, MixerCorpusState};
 use anyhow::Result;
 use ethers::providers::Middleware;
 use ethers::types::Address;
 use std::collections::HashMap;
-use std::env;
-use std::str::FromStr;
 
 #[derive(Debug, serde::Serialize, Clone)]
 pub enum WalletOrigin {
@@ -18,7 +19,9 @@ pub enum WalletOrigin {
 pub async fn trace_wallet_origin<M: Middleware>(
     address: Address,
     _provider: &M,
-    cex_wallets: &HashMap<String, String>,
+    cex_wallets: &HashMap<String, CexWalletMetadata>,
+    bridge_corpus: &BridgeCorpusState,
+    mixer_corpus: &MixerCorpusState,
     depth: u8,
 ) -> Result<WalletOrigin>
 where
@@ -36,28 +39,28 @@ where
 
     if let Some(exchange) = cex_wallets.get(&from_str) {
         return Ok(WalletOrigin::CexWithdrawal {
-            exchange: exchange.clone(),
+            exchange: exchange.exchange.clone(),
             tx_hash: format!("{:?}", first_tx.hash),
         });
     }
 
-    if let Some(bridge) = identify_bridge(first_tx.from) {
+    if let Some(bridge) = identify_bridge(first_tx.from, bridge_corpus) {
         return Ok(WalletOrigin::Bridge {
             bridge,
             tx_hash: format!("{:?}", first_tx.hash),
         });
     }
 
-    if is_mixer_contract(first_tx.from) {
-        return Ok(WalletOrigin::MixerFunded {
-            mixer: "tornado_cash".into(),
-        });
+    if let Some(mixer) = mixer_label_for(first_tx.from, mixer_corpus) {
+        return Ok(WalletOrigin::MixerFunded { mixer });
     }
 
     Box::pin(trace_wallet_origin(
         first_tx.from,
         _provider,
         cex_wallets,
+        bridge_corpus,
+        mixer_corpus,
         depth + 1,
     ))
     .await
@@ -68,40 +71,6 @@ async fn get_first_inbound_tx(address: Address) -> Result<Option<HistoricalTrans
     Ok(history.into_iter().find(|tx| tx.to == Some(address)))
 }
 
-fn identify_bridge(address: Address) -> Option<String> {
-    let normalized = format!("{address:?}").to_ascii_lowercase();
-    if let Some(label) = configured_bridge_registry().get(&normalized) {
-        return Some(label.clone());
-    }
-
-    match normalized.as_str() {
-        "0x4200000000000000000000000000000000000010" => Some("base_standard_bridge".to_string()),
-        "0x4200000000000000000000000000000000000007" => {
-            Some("base_l2_cross_domain_messenger".to_string())
-        }
-        _ => None,
-    }
-}
-
-fn configured_bridge_registry() -> HashMap<String, String> {
-    env::var("KNOWN_BRIDGE_ADDRESSES")
-        .ok()
-        .map(|value| {
-            value
-                .split(',')
-                .filter_map(|pair| {
-                    let (label, address) = pair.split_once('=')?;
-                    let parsed = Address::from_str(address.trim()).ok()?;
-                    Some((
-                        format!("{parsed:?}").to_ascii_lowercase(),
-                        label.trim().to_string(),
-                    ))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn is_mixer_contract(address: Address) -> bool {
-    crate::tracking::mixer_detector::is_known_mixer(address)
+fn identify_bridge(address: Address, bridge_corpus: &BridgeCorpusState) -> Option<String> {
+    bridge_label_for(address, &bridge_corpus.bridges)
 }

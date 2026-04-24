@@ -1,19 +1,20 @@
 use crate::model::{
-    Incident, IncidentArtifact, NewArtifact, NewBillingInvoice, NewHackIntelReport, NewIncident,
-    NewIntelReport, NewIntelSubscriber, NewProtocolBillingAccount, NewRecoveryCase,
-    NewSecurityReport, NewStoredSignature, NewVerificationJob, StoredBillingInvoice,
-    StoredDisclosure, StoredFinding, StoredHackIntelReport, StoredIntelReport,
-    StoredIntelSubscriber, StoredMonitorSnapshot, StoredProtocolBillingAccount, StoredRecoveryCase,
-    StoredScanRun, StoredSecurityReport, StoredSignature, StoredVerificationJob,
+    Incident, IncidentArtifact, NewArtifact, NewBillingInvoice, NewFilingSubmission,
+    NewHackIntelReport, NewIncident, NewIntelReport, NewIntelSubscriber, NewProtocolBillingAccount,
+    NewRecoveryCase, NewSecurityReport, NewStoredSignature, NewVerificationJob,
+    StoredBillingInvoice, StoredDisclosure, StoredFilingSubmission, StoredFinding,
+    StoredHackIntelReport, StoredIntelReport, StoredIntelSubscriber, StoredMonitorSnapshot,
+    StoredProtocolBillingAccount, StoredRecoveryCase, StoredScanRun, StoredSecurityReport,
+    StoredSignature, StoredVerificationJob,
 };
 use crate::proactive::{
     AttackVector, Severity, SimulationMode, VulnerabilityMatch, VulnerabilitySignature,
 };
 use crate::schema::{
-    billing_invoices, disclosure_events, hack_intel_reports, incident_artifacts, incidents,
-    intel_reports, intel_subscribers, monitor_snapshots, protocol_billing_accounts,
-    protocol_findings, protocol_scan_runs, recovery_cases, security_reports, verification_jobs,
-    vulnerability_signatures,
+    billing_invoices, disclosure_events, filing_submissions, hack_intel_reports,
+    incident_artifacts, incidents, intel_reports, intel_subscribers, monitor_snapshots,
+    protocol_billing_accounts, protocol_findings, protocol_scan_runs, recovery_cases,
+    security_reports, verification_jobs, vulnerability_signatures,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -129,6 +130,18 @@ const MIGRATIONS: &[MigrationFile] = &[
             "../migrations/2026-04-24-000100_add_simulation_mode_to_protocol_findings/up.sql"
         ),
     },
+    MigrationFile {
+        version: "2026-04-24-000200",
+        name: "add_corpus_provenance_to_incidents",
+        up_sql: include_str!(
+            "../migrations/2026-04-24-000200_add_corpus_provenance_to_incidents/up.sql"
+        ),
+    },
+    MigrationFile {
+        version: "2026-04-24-000300",
+        name: "create_filing_submissions",
+        up_sql: include_str!("../migrations/2026-04-24-000300_create_filing_submissions/up.sql"),
+    },
 ];
 
 pub async fn create_pool(database_url: &str) -> Result<PgPool> {
@@ -220,6 +233,7 @@ pub async fn upsert_incident(
             incidents::detected_at.eq(incident.detected_at),
             incidents::last_updated_at.eq(incident.last_updated_at),
             incidents::signals.eq(incident.signals.clone()),
+            incidents::corpus_provenance.eq(incident.corpus_provenance.clone()),
             incidents::raw_transaction.eq(incident.raw_transaction.clone()),
             incidents::summary.eq(incident.summary.clone()),
         ))
@@ -650,6 +664,58 @@ pub async fn get_incident(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Re
         .await?;
 
     Ok(incident)
+}
+
+pub async fn list_monitor_snapshots(
+    conn: &mut AsyncPgConnection,
+    limit: i64,
+) -> Result<Vec<StoredMonitorSnapshot>> {
+    let rows = monitor_snapshots::table
+        .order(monitor_snapshots::observed_at.desc())
+        .limit(limit)
+        .select(StoredMonitorSnapshot::as_select())
+        .load(conn)
+        .await?;
+
+    Ok(rows)
+}
+
+pub async fn list_security_reports(
+    conn: &mut AsyncPgConnection,
+    limit: i64,
+) -> Result<Vec<StoredSecurityReport>> {
+    let rows = security_reports::table
+        .order(security_reports::generated_at.desc())
+        .limit(limit)
+        .select(StoredSecurityReport::as_select())
+        .load(conn)
+        .await?;
+
+    Ok(rows)
+}
+
+pub async fn get_scan_run(
+    conn: &mut AsyncPgConnection,
+    scan_run_id: Uuid,
+) -> Result<StoredScanRun> {
+    let row = protocol_scan_runs::table
+        .find(scan_run_id)
+        .select(StoredScanRun::as_select())
+        .first(conn)
+        .await?;
+
+    Ok(row)
+}
+
+pub async fn list_findings(conn: &mut AsyncPgConnection, limit: i64) -> Result<Vec<StoredFinding>> {
+    let rows = protocol_findings::table
+        .order(protocol_findings::created_at.desc())
+        .limit(limit)
+        .select(StoredFinding::as_select())
+        .load(conn)
+        .await?;
+
+    Ok(rows)
 }
 
 pub async fn upsert_protocol_billing_account(
@@ -1085,6 +1151,46 @@ pub async fn insert_security_report(
     Ok(row)
 }
 
+pub async fn insert_filing_submission(
+    conn: &mut AsyncPgConnection,
+    filing: &NewFilingSubmission,
+) -> Result<StoredFilingSubmission> {
+    let row = diesel::insert_into(filing_submissions::table)
+        .values((
+            filing_submissions::id.eq(Uuid::new_v4()),
+            filing_submissions::incident_id.eq(filing.incident_id),
+            filing_submissions::artifact_kind.eq(filing.artifact_kind.clone()),
+            filing_submissions::filing_target.eq(filing.filing_target.clone()),
+            filing_submissions::destination.eq(filing.destination.clone()),
+            filing_submissions::status.eq(filing.status.clone()),
+            filing_submissions::request_payload.eq(filing.request_payload.clone()),
+            filing_submissions::response_status_code.eq(filing.response_status_code),
+            filing_submissions::response_body.eq(filing.response_body.clone()),
+            filing_submissions::error_message.eq(filing.error_message.clone()),
+            filing_submissions::submitted_at.eq(filing.submitted_at),
+            filing_submissions::completed_at.eq(filing.completed_at),
+        ))
+        .returning(StoredFilingSubmission::as_returning())
+        .get_result(conn)
+        .await?;
+
+    Ok(row)
+}
+
+pub async fn list_filing_submissions_for_incident(
+    conn: &mut AsyncPgConnection,
+    incident_id_value: Uuid,
+) -> Result<Vec<StoredFilingSubmission>> {
+    let rows = filing_submissions::table
+        .filter(filing_submissions::incident_id.eq(incident_id_value))
+        .order(filing_submissions::submitted_at.desc())
+        .select(StoredFilingSubmission::as_select())
+        .load(conn)
+        .await?;
+
+    Ok(rows)
+}
+
 pub fn decode_signature(row: &StoredSignature) -> Result<VulnerabilitySignature> {
     let mut signature: VulnerabilitySignature = serde_json::from_value(row.raw_signature.clone())?;
     signature.id = row.id;
@@ -1138,6 +1244,7 @@ async fn update_existing_incident(
             incidents::detected_at.eq(earliest_detected_at),
             incidents::last_updated_at.eq(incident.last_updated_at),
             incidents::signals.eq(incident.signals.clone()),
+            incidents::corpus_provenance.eq(incident.corpus_provenance.clone()),
             incidents::raw_transaction.eq(incident.raw_transaction.clone()),
             incidents::summary.eq(incident.summary.clone()),
         ))

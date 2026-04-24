@@ -7,13 +7,17 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-#[derive(Debug, serde::Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, serde::Serialize, Clone, PartialEq)]
 pub struct CexDeposit {
     pub exchange: String,
+    pub service: Option<String>,
+    pub jurisdiction: Option<String>,
     pub deposit_tx_hash: String,
     pub exploit_tx_hash: String,
     pub amount: String,
     pub legal_basis: String,
+    pub source: Option<String>,
+    pub confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +29,7 @@ pub struct CexCorpusState {
     pub duplicate_entries: usize,
     pub conflicting_entries: usize,
     pub invalid_entries: usize,
-    pub wallets: HashMap<String, String>,
+    pub wallets: HashMap<String, CexWalletMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,21 +58,50 @@ pub struct CexCorpusValidationReport {
     pub exchange_counts: BTreeMap<String, usize>,
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+pub struct CexWalletMetadata {
+    pub exchange: String,
+    #[serde(default)]
+    pub service: Option<String>,
+    #[serde(default)]
+    pub jurisdiction: Option<String>,
+    #[serde(default)]
+    pub legal_basis: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+}
+
+impl CexWalletMetadata {
+    pub fn legal_basis(&self) -> String {
+        self.legal_basis
+            .clone()
+            .unwrap_or_else(|| legal_basis_for_exchange(&self.exchange).to_string())
+    }
+}
+
 pub fn detect_cex_deposit(
     tx: &Transaction,
     to: Address,
-    cex_wallets: &HashMap<String, String>,
+    cex_wallets: &HashMap<String, CexWalletMetadata>,
     exploit_tx_hash: Option<&str>,
 ) -> Option<CexDeposit> {
     let to_str = normalize_address(&format!("{to:?}")).ok()?;
-    let exchange = cex_wallets.get(&to_str)?;
+    let metadata = cex_wallets.get(&to_str)?;
 
     Some(CexDeposit {
-        exchange: exchange.clone(),
+        exchange: metadata.exchange.clone(),
+        service: metadata.service.clone(),
+        jurisdiction: metadata.jurisdiction.clone(),
         deposit_tx_hash: format!("{:?}", tx.hash),
         exploit_tx_hash: exploit_tx_hash.unwrap_or_default().to_string(),
         amount: tx.value.to_string(),
-        legal_basis: legal_basis_for_exchange(exchange).to_string(),
+        legal_basis: metadata.legal_basis(),
+        source: metadata.source.clone(),
+        confidence: metadata.confidence,
     })
 }
 
@@ -98,12 +131,15 @@ pub fn load_cex_wallet_corpus_state(path: &Path) -> Result<CexCorpusState> {
     let entries = match corpus {
         CexCorpus::Map(entries) => entries
             .into_iter()
-            .map(|(address, exchange)| CexWalletRecord { address, exchange })
+            .map(|(address, metadata)| CexWalletRecord {
+                address,
+                metadata: metadata.into_metadata(),
+            })
             .collect::<Vec<_>>(),
         CexCorpus::List(entries) => entries,
     };
 
-    let mut normalized = HashMap::new();
+    let mut normalized: HashMap<String, CexWalletMetadata> = HashMap::new();
     let mut duplicate_entries = 0usize;
     let mut conflicting_entries = 0usize;
     let mut invalid_entries = 0usize;
@@ -114,7 +150,7 @@ pub fn load_cex_wallet_corpus_state(path: &Path) -> Result<CexCorpusState> {
                 invalid_entries += 1;
                 tracing::warn!(
                     address = %entry.address,
-                    exchange = %entry.exchange,
+                    exchange = %entry.metadata.exchange,
                     "skipping invalid CEX wallet corpus entry"
                 );
                 continue;
@@ -122,20 +158,20 @@ pub fn load_cex_wallet_corpus_state(path: &Path) -> Result<CexCorpusState> {
         };
 
         match normalized.get(&normalized_address) {
-            Some(existing) if existing == &entry.exchange => {
+            Some(existing) if existing == &entry.metadata => {
                 duplicate_entries += 1;
             }
-            Some(existing) if existing != &entry.exchange => {
+            Some(existing) if existing != &entry.metadata => {
                 conflicting_entries += 1;
                 tracing::warn!(
                     address = %normalized_address,
-                    existing_exchange = %existing,
-                    conflicting_exchange = %entry.exchange,
+                    existing_exchange = %existing.exchange,
+                    conflicting_exchange = %entry.metadata.exchange,
                     "conflicting exchange labels in CEX wallet corpus; keeping first label"
                 );
             }
             None => {
-                normalized.insert(normalized_address, entry.exchange.clone());
+                normalized.insert(normalized_address, entry.metadata.clone());
             }
             _ => {}
         }
@@ -217,14 +253,39 @@ fn normalize_address(address: &str) -> Result<String> {
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum CexCorpus {
-    Map(HashMap<String, String>),
+    Map(HashMap<String, CexCorpusMapValue>),
     List(Vec<CexWalletRecord>),
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+enum CexCorpusMapValue {
+    Exchange(String),
+    Metadata(CexWalletMetadata),
+}
+
+impl CexCorpusMapValue {
+    fn into_metadata(self) -> CexWalletMetadata {
+        match self {
+            Self::Exchange(exchange) => CexWalletMetadata {
+                exchange,
+                service: None,
+                jurisdiction: None,
+                legal_basis: None,
+                source: None,
+                confidence: None,
+                labels: Vec::new(),
+            },
+            Self::Metadata(metadata) => metadata,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct CexWalletRecord {
     address: String,
-    exchange: String,
+    #[serde(flatten)]
+    metadata: CexWalletMetadata,
 }
 
 impl CexCorpusState {
@@ -244,14 +305,14 @@ impl CexCorpusState {
 
     fn exchange_counts(&self) -> BTreeMap<String, usize> {
         let mut counts = BTreeMap::new();
-        for exchange in self.wallets.values() {
-            *counts.entry(exchange.clone()).or_insert(0) += 1;
+        for metadata in self.wallets.values() {
+            *counts.entry(metadata.exchange.clone()).or_insert(0) += 1;
         }
         counts
     }
 }
 
-fn checksum_for_entries(entries: &HashMap<String, String>) -> Result<String> {
+fn checksum_for_entries(entries: &HashMap<String, CexWalletMetadata>) -> Result<String> {
     let canonical = BTreeMap::from_iter(
         entries
             .iter()
@@ -267,7 +328,7 @@ fn checksum_for_entries(entries: &HashMap<String, String>) -> Result<String> {
 mod tests {
     use super::{
         detect_cex_deposit, legal_basis_for_exchange, load_cex_wallet_corpus_state,
-        validate_cex_wallet_corpus,
+        validate_cex_wallet_corpus, CexWalletMetadata,
     };
     use ethers::types::{Address, Transaction, TxHash, U256, U64};
     use std::collections::HashMap;
@@ -281,7 +342,15 @@ mod tests {
         let address = Address::from_str("0x00000000000000000000000000000000000000aa").unwrap();
         cex_wallets.insert(
             format!("{address:?}").to_ascii_lowercase(),
-            "Coinbase".to_string(),
+            CexWalletMetadata {
+                exchange: "Coinbase".to_string(),
+                service: Some("spot".to_string()),
+                jurisdiction: Some("US".to_string()),
+                legal_basis: None,
+                source: Some("internal_feed".to_string()),
+                confidence: Some(0.95),
+                labels: vec!["custodial".to_string()],
+            },
         );
 
         let tx = Transaction {
@@ -299,6 +368,8 @@ mod tests {
 
         let deposit = detect_cex_deposit(&tx, address, &cex_wallets, Some("0xexploit")).unwrap();
         assert_eq!(deposit.exchange, "Coinbase");
+        assert_eq!(deposit.service.as_deref(), Some("spot"));
+        assert_eq!(deposit.jurisdiction.as_deref(), Some("US"));
         assert_eq!(deposit.exploit_tx_hash, "0xexploit");
         assert_eq!(deposit.legal_basis, "FinCEN_SAR");
     }
@@ -317,7 +388,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("ghost-cex-wallets-{nonce}.json"));
         fs::write(
             &path,
-            r#"[{"address":"0x00000000000000000000000000000000000000aa","exchange":"Coinbase"}]"#,
+            r#"[{"address":"0x00000000000000000000000000000000000000aa","exchange":"Coinbase","jurisdiction":"US"}]"#,
         )
         .unwrap();
 
@@ -325,8 +396,9 @@ mod tests {
         assert_eq!(
             corpus
                 .wallets
-                .get("0x00000000000000000000000000000000000000aa"),
-            Some(&"Coinbase".to_string())
+                .get("0x00000000000000000000000000000000000000aa")
+                .map(|metadata| metadata.exchange.clone()),
+            Some("Coinbase".to_string())
         );
         let _ = fs::remove_file(path);
     }

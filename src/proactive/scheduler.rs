@@ -12,6 +12,7 @@ use crate::db::{
     decode_signature, insert_hack_report_if_new, insert_monitor_snapshot, insert_signature,
     list_signatures,
 };
+use crate::intelligence::attribution_feeds;
 use crate::model::StoredMonitorSnapshot;
 use crate::model::{NewHackIntelReport, NewStoredSignature};
 use crate::protocols::ProtocolDefinition;
@@ -66,6 +67,25 @@ pub fn start(state: Arc<AppState>) {
             }
         }
     });
+
+    if attribution_feeds::has_configured_remote_feeds(&state) {
+        let attribution_state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = interval(std::time::Duration::from_secs(
+                attribution_state.config.attribution_feed_sync_interval_secs,
+            ));
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            loop {
+                ticker.tick().await;
+                if let Err(error) =
+                    attribution_feeds::sync_configured_feeds(&attribution_state).await
+                {
+                    tracing::error!(error = %error, "attribution feed sync failed");
+                }
+            }
+        });
+    }
 }
 
 pub async fn poll_and_scan(state: Arc<AppState>) -> Result<()> {
@@ -199,12 +219,7 @@ pub async fn run_full_scan(state: Arc<AppState>) -> Result<()> {
         }
 
         if let Some(result) =
-            upgrade_monitor::monitor_protocol(
-                &state,
-                &protocol,
-                &signatures,
-                ScanMode::Scheduled,
-            )
+            upgrade_monitor::monitor_protocol(&state, &protocol, &signatures, ScanMode::Scheduled)
                 .await?
         {
             let result = annotate_scan_result(result, &effective_protocol);

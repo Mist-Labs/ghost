@@ -1,6 +1,8 @@
+use crate::intelligence::bridge_corpus::BridgeCorpusState;
 use crate::intelligence::history::{fetch_address_transactions, HistoricalTransaction};
 use crate::intelligence::wallet_tracer::trace_wallet_origin;
-use crate::tracking::cex_surveillance::load_cex_wallet_corpus_state;
+use crate::tracking::cex_surveillance::{load_cex_wallet_corpus_state, CexWalletMetadata};
+use crate::tracking::mixer_detector::{load_mixer_corpus_state, MixerCorpusState};
 use anyhow::Result;
 use chrono::{Timelike, Utc};
 use ethers::providers::Middleware;
@@ -29,6 +31,9 @@ pub async fn build_fingerprint<M: Middleware>(
     attacker: Address,
     exploit_tx_hash: H256,
     provider: &M,
+    cex_wallets: Option<&std::collections::HashMap<String, CexWalletMetadata>>,
+    bridge_corpus: Option<&BridgeCorpusState>,
+    mixer_corpus: Option<&MixerCorpusState>,
 ) -> Result<AttackerProfile>
 where
     <M as Middleware>::Error: 'static,
@@ -72,7 +77,30 @@ where
     let hour_utc = chrono::DateTime::from_timestamp(block.timestamp.as_u64() as i64, 0)
         .unwrap_or_default()
         .hour();
-    let cex_wallets = load_cex_wallets();
+    let loaded_cex_wallets;
+    let cex_wallets = match cex_wallets {
+        Some(wallets) => wallets,
+        None => {
+            loaded_cex_wallets = load_cex_wallets();
+            &loaded_cex_wallets
+        }
+    };
+    let loaded_bridge_corpus;
+    let bridge_corpus = match bridge_corpus {
+        Some(corpus) => corpus,
+        None => {
+            loaded_bridge_corpus = load_bridge_corpus();
+            &loaded_bridge_corpus
+        }
+    };
+    let loaded_mixer_corpus;
+    let mixer_corpus = match mixer_corpus {
+        Some(corpus) => corpus,
+        None => {
+            loaded_mixer_corpus = load_mixer_corpus();
+            &loaded_mixer_corpus
+        }
+    };
 
     Ok(AttackerProfile {
         address: format!("{:?}", attacker),
@@ -82,7 +110,15 @@ where
         estimated_timezone: hour_to_timezone(hour_utc),
         used_private_mempool,
         wallet_age_days: compute_wallet_age_days(&tx_history),
-        origin: trace_wallet_origin(attacker, provider, &cex_wallets, 0).await?,
+        origin: trace_wallet_origin(
+            attacker,
+            provider,
+            cex_wallets,
+            bridge_corpus,
+            mixer_corpus,
+            0,
+        )
+        .await?,
     })
 }
 
@@ -122,11 +158,41 @@ fn compute_wallet_age_days(tx_history: &[HistoricalTransaction]) -> u64 {
     age.num_days().max(0) as u64
 }
 
-fn load_cex_wallets() -> std::collections::HashMap<String, String> {
+fn load_cex_wallets() -> std::collections::HashMap<String, CexWalletMetadata> {
     let path = std::env::var("CEX_WALLETS_FILE").unwrap_or_else(|_| "cex_wallets.json".into());
     load_cex_wallet_corpus_state(std::path::Path::new(&path))
         .map(|state| state.wallets)
         .unwrap_or_default()
+}
+
+fn load_bridge_corpus() -> BridgeCorpusState {
+    let path =
+        std::env::var("BRIDGE_ADDRESSES_FILE").unwrap_or_else(|_| "bridge_addresses.json".into());
+    crate::intelligence::bridge_corpus::load_bridge_corpus_state(std::path::Path::new(&path))
+        .unwrap_or_else(|_| crate::intelligence::bridge_corpus::BridgeCorpusState {
+            path: std::path::PathBuf::from(path),
+            checksum_sha256: String::new(),
+            loaded_at: Utc::now(),
+            source_entries: 0,
+            duplicate_entries: 0,
+            conflicting_entries: 0,
+            invalid_entries: 0,
+            bridges: std::collections::HashMap::new(),
+        })
+}
+
+fn load_mixer_corpus() -> MixerCorpusState {
+    let path = std::env::var("MIXER_POOLS_FILE").unwrap_or_else(|_| "mixer_pools.json".into());
+    load_mixer_corpus_state(std::path::Path::new(&path)).unwrap_or_else(|_| MixerCorpusState {
+        path: std::path::PathBuf::from(path),
+        checksum_sha256: String::new(),
+        loaded_at: Utc::now(),
+        source_entries: 0,
+        duplicate_entries: 0,
+        conflicting_entries: 0,
+        invalid_entries: 0,
+        pools: std::collections::HashMap::new(),
+    })
 }
 
 fn method_selector(input: &[u8]) -> Option<String> {

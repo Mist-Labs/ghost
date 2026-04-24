@@ -5,12 +5,17 @@ use crate::billing::retainer::{record_incident as record_billable_incident, run_
 use crate::billing::success_fee::{invoice_success_fee, open_recovery_case, record_recovery};
 use crate::bounty::deploy::{deploy_bounty_contract, BountyDeploymentRequest};
 use crate::db::{
-    get_incident, list_disclosures, list_hack_reports, list_incidents, list_scan_runs,
-    list_signatures, ping,
+    get_finding, get_incident, get_scan_run, list_disclosures,
+    list_filing_submissions_for_incident, list_findings, list_hack_reports,
+    list_incident_artifacts, list_incidents, list_monitor_snapshots, list_scan_runs,
+    list_security_reports, list_signatures, list_verification_jobs_for_incident, ping,
 };
+use crate::intelligence::attribution_feeds::{feed_overview, sync_configured_feeds};
+use crate::intelligence::bridge_corpus::load_bridge_corpus_state;
 use crate::proactive::disclosure::acknowledge as acknowledge_disclosure;
 use crate::state::AppState;
 use crate::tracking::cex_surveillance::load_cex_wallet_corpus_state;
+use crate::tracking::mixer_detector::load_mixer_corpus_state;
 use actix_web::{get, http::StatusCode, post, web, HttpRequest, HttpResponse, Responder};
 use ethers::providers::Middleware;
 use serde::Deserialize;
@@ -21,6 +26,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(healthz)
         .service(readyz)
         .service(list_incidents_handler)
+        .service(get_incident_handler)
+        .service(list_incident_artifacts_handler)
+        .service(list_incident_verification_jobs_handler)
+        .service(list_incident_filings_handler)
         .service(get_intel_feed_handler)
         .service(onboard_intel_subscriber_handler)
         .service(publish_intel_report_handler)
@@ -32,10 +41,21 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(list_hack_reports_handler)
         .service(list_signatures_handler)
         .service(list_scan_runs_handler)
+        .service(get_scan_run_handler)
+        .service(list_findings_handler)
+        .service(get_finding_handler)
         .service(list_disclosures_handler)
         .service(acknowledge_disclosure_handler)
         .service(get_cex_corpus_handler)
-        .service(reload_cex_corpus_handler);
+        .service(reload_cex_corpus_handler)
+        .service(get_bridge_corpus_handler)
+        .service(reload_bridge_corpus_handler)
+        .service(get_mixer_corpus_handler)
+        .service(reload_mixer_corpus_handler)
+        .service(get_attribution_feeds_handler)
+        .service(sync_attribution_feeds_handler)
+        .service(list_monitor_snapshots_handler)
+        .service(list_security_reports_handler);
 }
 
 #[get("/healthz")]
@@ -86,6 +106,114 @@ async fn list_incidents_handler(
 
     match list_incidents(&mut conn, 100).await {
         Ok(incidents) => HttpResponse::Ok().json(incidents),
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/incidents/{incident_id}")]
+async fn get_incident_handler(
+    req: HttpRequest,
+    path: web::Path<uuid::Uuid>,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match get_incident(&mut conn, path.into_inner()).await {
+        Ok(incident) => HttpResponse::Ok().json(incident),
+        Err(error) => HttpResponse::BadRequest().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/incidents/{incident_id}/artifacts")]
+async fn list_incident_artifacts_handler(
+    req: HttpRequest,
+    path: web::Path<uuid::Uuid>,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match list_incident_artifacts(&mut conn, path.into_inner()).await {
+        Ok(artifacts) => HttpResponse::Ok().json(artifacts),
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/incidents/{incident_id}/verification-jobs")]
+async fn list_incident_verification_jobs_handler(
+    req: HttpRequest,
+    path: web::Path<uuid::Uuid>,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match list_verification_jobs_for_incident(&mut conn, path.into_inner()).await {
+        Ok(rows) => HttpResponse::Ok().json(rows),
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/incidents/{incident_id}/filings")]
+async fn list_incident_filings_handler(
+    req: HttpRequest,
+    path: web::Path<uuid::Uuid>,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match list_filing_submissions_for_incident(&mut conn, path.into_inner()).await {
+        Ok(rows) => HttpResponse::Ok().json(rows),
         Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
             "error": error.to_string(),
         })),
@@ -444,6 +572,86 @@ async fn list_scan_runs_handler(
     }
 }
 
+#[get("/proactive/scans/{id}")]
+async fn get_scan_run_handler(
+    req: HttpRequest,
+    path: web::Path<uuid::Uuid>,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match get_scan_run(&mut conn, path.into_inner()).await {
+        Ok(row) => HttpResponse::Ok().json(row),
+        Err(error) => HttpResponse::BadRequest().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/proactive/findings")]
+async fn list_findings_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match list_findings(&mut conn, 200).await {
+        Ok(rows) => HttpResponse::Ok().json(rows),
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/proactive/findings/{id}")]
+async fn get_finding_handler(
+    req: HttpRequest,
+    path: web::Path<uuid::Uuid>,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match get_finding(&mut conn, path.into_inner()).await {
+        Ok(row) => HttpResponse::Ok().json(row),
+        Err(error) => HttpResponse::BadRequest().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
 #[get("/proactive/disclosures")]
 async fn list_disclosures_handler(
     req: HttpRequest,
@@ -517,6 +725,157 @@ async fn reload_cex_corpus_handler(
             *state.cex_wallets.write().await = new_state;
             HttpResponse::Ok().json(summary)
         }
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/admin/bridge-corpus")]
+async fn get_bridge_corpus_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let summary = state.bridge_corpus.read().await.summary();
+    HttpResponse::Ok().json(summary)
+}
+
+#[post("/admin/bridge-corpus/reload")]
+async fn reload_bridge_corpus_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    match load_bridge_corpus_state(&state.config.bridge_addresses_file) {
+        Ok(new_state) => {
+            let summary = new_state.summary();
+            *state.bridge_corpus.write().await = new_state;
+            HttpResponse::Ok().json(summary)
+        }
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/admin/mixer-corpus")]
+async fn get_mixer_corpus_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let summary = state.mixer_corpus.read().await.summary();
+    HttpResponse::Ok().json(summary)
+}
+
+#[post("/admin/mixer-corpus/reload")]
+async fn reload_mixer_corpus_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    match load_mixer_corpus_state(&state.config.mixer_pools_file) {
+        Ok(new_state) => {
+            let summary = new_state.summary();
+            *state.mixer_corpus.write().await = new_state;
+            HttpResponse::Ok().json(summary)
+        }
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/admin/attribution-feeds")]
+async fn get_attribution_feeds_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    HttpResponse::Ok().json(feed_overview(state.get_ref().as_ref()).await)
+}
+
+#[post("/admin/attribution-feeds/sync")]
+async fn sync_attribution_feeds_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    match sync_configured_feeds(state.get_ref()).await {
+        Ok(results) => HttpResponse::Ok().json(serde_json::json!({
+            "synced": results,
+        })),
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/monitoring/snapshots")]
+async fn list_monitor_snapshots_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match list_monitor_snapshots(&mut conn, 200).await {
+        Ok(rows) => HttpResponse::Ok().json(rows),
+        Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    }
+}
+
+#[get("/monitoring/security-reports")]
+async fn list_security_reports_handler(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    if let Err(response) = authorize(&req, state.config.api_key.as_deref()) {
+        return response;
+    }
+
+    let mut conn = match state.pool.get().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": error.to_string(),
+            }))
+        }
+    };
+
+    match list_security_reports(&mut conn, 100).await {
+        Ok(rows) => HttpResponse::Ok().json(rows),
         Err(error) => HttpResponse::InternalServerError().json(serde_json::json!({
             "error": error.to_string(),
         })),

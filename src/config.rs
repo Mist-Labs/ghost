@@ -13,10 +13,16 @@ pub struct Config {
     pub explorer_api_url: String,
     pub protocols_file: PathBuf,
     pub cex_wallets_file: PathBuf,
+    pub bridge_addresses_file: PathBuf,
+    pub mixer_pools_file: PathBuf,
+    pub cex_wallets_feed_url: Option<String>,
+    pub bridge_addresses_feed_url: Option<String>,
+    pub mixer_pools_feed_url: Option<String>,
     pub artifact_dir: PathBuf,
     pub min_alert_score: u8,
     pub hack_feed_poll_interval_secs: u64,
     pub full_scan_interval_secs: u64,
+    pub attribution_feed_sync_interval_secs: u64,
     pub disclosure_followup_interval_secs: u64,
     pub disclosure_first_response_sla_hours: u64,
     pub disclosure_resolution_sla_days: u64,
@@ -38,6 +44,11 @@ pub struct Config {
     pub maxmind_db_path: Option<PathBuf>,
     pub mugen: Option<MugenConfig>,
     pub bounty: Option<BountyConfig>,
+    pub filing_bearer_token: Option<String>,
+    pub filing_timeout_secs: u64,
+    pub ic3_submission_url: Option<String>,
+    pub national_cybercrime_submission_url: Option<String>,
+    pub ec3_coordination_submission_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -95,8 +106,24 @@ impl Config {
         let cex_wallets_file = PathBuf::from(
             env::var("CEX_WALLETS_FILE").unwrap_or_else(|_| "cex_wallets.json".to_string()),
         );
+        let bridge_addresses_file = PathBuf::from(
+            env::var("BRIDGE_ADDRESSES_FILE")
+                .unwrap_or_else(|_| "bridge_addresses.json".to_string()),
+        );
+        let mixer_pools_file = PathBuf::from(
+            env::var("MIXER_POOLS_FILE").unwrap_or_else(|_| "mixer_pools.json".to_string()),
+        );
         let artifact_dir =
             PathBuf::from(env::var("ARTIFACT_DIR").unwrap_or_else(|_| "artifacts".to_string()));
+        let cex_wallets_feed_url = env::var("CEX_WALLETS_FEED_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let bridge_addresses_feed_url = env::var("BRIDGE_ADDRESSES_FEED_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let mixer_pools_feed_url = env::var("MIXER_POOLS_FEED_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let min_alert_score = env::var("MIN_ALERT_SCORE")
             .ok()
             .map(|value| value.parse::<u8>())
@@ -115,6 +142,12 @@ impl Config {
             .transpose()
             .context("FULL_SCAN_INTERVAL_SECS must be a valid u64")?
             .unwrap_or(86400);
+        let attribution_feed_sync_interval_secs = env::var("ATTRIBUTION_FEED_SYNC_INTERVAL_SECS")
+            .ok()
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .context("ATTRIBUTION_FEED_SYNC_INTERVAL_SECS must be a valid u64")?
+            .unwrap_or(3600);
         let disclosure_followup_interval_secs = env::var("DISCLOSURE_FOLLOWUP_INTERVAL_SECS")
             .ok()
             .map(|value| value.parse::<u64>())
@@ -179,6 +212,24 @@ impl Config {
         let zero_g = zero_g_from_env()?;
         let mugen = mugen_from_env()?;
         let bounty = bounty_from_env()?;
+        let filing_bearer_token = env::var("FILING_BEARER_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let filing_timeout_secs = env::var("FILING_TIMEOUT_SECS")
+            .ok()
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .context("FILING_TIMEOUT_SECS must be a valid u64")?
+            .unwrap_or(30);
+        let ic3_submission_url = env::var("IC3_SUBMISSION_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let national_cybercrime_submission_url = env::var("NATIONAL_CYBERCRIME_SUBMISSION_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let ec3_coordination_submission_url = env::var("EC3_COORDINATION_SUBMISSION_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
 
         Ok(Self {
             http_bind,
@@ -190,10 +241,16 @@ impl Config {
             explorer_api_url,
             protocols_file,
             cex_wallets_file,
+            bridge_addresses_file,
+            mixer_pools_file,
+            cex_wallets_feed_url,
+            bridge_addresses_feed_url,
+            mixer_pools_feed_url,
             artifact_dir,
             min_alert_score,
             hack_feed_poll_interval_secs,
             full_scan_interval_secs,
+            attribution_feed_sync_interval_secs,
             disclosure_followup_interval_secs,
             disclosure_first_response_sla_hours,
             disclosure_resolution_sla_days,
@@ -215,6 +272,11 @@ impl Config {
             maxmind_db_path,
             mugen,
             bounty,
+            filing_bearer_token,
+            filing_timeout_secs,
+            ic3_submission_url,
+            national_cybercrime_submission_url,
+            ec3_coordination_submission_url,
         })
     }
 }

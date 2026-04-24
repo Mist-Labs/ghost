@@ -19,6 +19,7 @@ pub struct NewIncident {
     pub detected_at: DateTime<Utc>,
     pub last_updated_at: DateTime<Utc>,
     pub signals: serde_json::Value,
+    pub corpus_provenance: serde_json::Value,
     pub raw_transaction: serde_json::Value,
     pub summary: Option<String>,
 }
@@ -40,6 +41,7 @@ pub struct Incident {
     pub detected_at: DateTime<Utc>,
     pub last_updated_at: DateTime<Utc>,
     pub signals: serde_json::Value,
+    pub corpus_provenance: serde_json::Value,
     pub raw_transaction: serde_json::Value,
     pub summary: Option<String>,
 }
@@ -412,4 +414,36 @@ pub struct StoredSecurityReport {
     pub email_error: Option<String>,
     pub generated_at: DateTime<Utc>,
     pub delivered_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewFilingSubmission {
+    pub incident_id: Uuid,
+    pub artifact_kind: String,
+    pub filing_target: String,
+    pub destination: String,
+    pub status: String,
+    pub request_payload: serde_json::Value,
+    pub response_status_code: Option<i32>,
+    pub response_body: Option<String>,
+    pub error_message: Option<String>,
+    pub submitted_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::filing_submissions)]
+pub struct StoredFilingSubmission {
+    pub id: Uuid,
+    pub incident_id: Uuid,
+    pub artifact_kind: String,
+    pub filing_target: String,
+    pub destination: String,
+    pub status: String,
+    pub request_payload: serde_json::Value,
+    pub response_status_code: Option<i32>,
+    pub response_body: Option<String>,
+    pub error_message: Option<String>,
+    pub submitted_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
 }

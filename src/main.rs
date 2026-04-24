@@ -70,6 +70,14 @@ async fn main() -> std::io::Result<()> {
         tracking::cex_surveillance::load_cex_wallet_corpus_state(&config.cex_wallets_file)
             .map_err(to_io_error)?,
     ));
+    let bridge_corpus = Arc::new(RwLock::new(
+        intelligence::bridge_corpus::load_bridge_corpus_state(&config.bridge_addresses_file)
+            .map_err(to_io_error)?,
+    ));
+    let mixer_corpus = Arc::new(RwLock::new(
+        tracking::mixer_detector::load_mixer_corpus_state(&config.mixer_pools_file)
+            .map_err(to_io_error)?,
+    ));
     let fund_tracker = tracking::fund_tracker::FundTracker::new();
 
     let artifact_store =
@@ -87,6 +95,8 @@ async fn main() -> std::io::Result<()> {
         http_client: reqwest::Client::new(),
         fund_tracker,
         cex_wallets: cex_wallets.clone(),
+        bridge_corpus: bridge_corpus.clone(),
+        mixer_corpus: mixer_corpus.clone(),
     });
 
     let listener_state = state.clone();
@@ -124,6 +134,8 @@ async fn main() -> std::io::Result<()> {
     proactive::scheduler::start(state.clone());
 
     let cex_summary = state.cex_wallets.read().await.summary();
+    let bridge_summary = state.bridge_corpus.read().await.summary();
+    let mixer_summary = state.mixer_corpus.read().await.summary();
 
     tracing::info!(
         bind = %config.http_bind,
@@ -131,6 +143,10 @@ async fn main() -> std::io::Result<()> {
         protocols_loaded = state.protocols.protocol_count(),
         cex_wallets_loaded = cex_summary.unique_addresses,
         cex_wallets_checksum = %cex_summary.checksum_sha256,
+        bridge_addresses_loaded = bridge_summary.unique_addresses,
+        bridge_addresses_checksum = %bridge_summary.checksum_sha256,
+        mixer_pools_loaded = mixer_summary.unique_addresses,
+        mixer_pools_checksum = %mixer_summary.checksum_sha256,
         zero_g_enabled = matches!(state.artifact_store, crate::artifacts::ArtifactStore::ZeroG(_)),
         openai_enabled = state.config.openai_api_key.is_some(),
         "Ghost service starting"
@@ -165,6 +181,30 @@ fn handle_cli_commands() -> std::io::Result<Option<i32>> {
                 .unwrap_or_else(|| "cex_wallets.json".into());
             let report = tracking::cex_surveillance::validate_cex_wallet_corpus(&path)
                 .map_err(to_io_error)?;
+            let output = serde_json::to_string_pretty(&report).map_err(to_io_error)?;
+            println!("{output}");
+            Ok(Some(0))
+        }
+        "validate-bridge-corpus" => {
+            let path = args
+                .next()
+                .map(std::path::PathBuf::from)
+                .or_else(|| std::env::var("BRIDGE_ADDRESSES_FILE").ok().map(Into::into))
+                .unwrap_or_else(|| "bridge_addresses.json".into());
+            let report =
+                intelligence::bridge_corpus::validate_bridge_corpus(&path).map_err(to_io_error)?;
+            let output = serde_json::to_string_pretty(&report).map_err(to_io_error)?;
+            println!("{output}");
+            Ok(Some(0))
+        }
+        "validate-mixer-corpus" => {
+            let path = args
+                .next()
+                .map(std::path::PathBuf::from)
+                .or_else(|| std::env::var("MIXER_POOLS_FILE").ok().map(Into::into))
+                .unwrap_or_else(|| "mixer_pools.json".into());
+            let report =
+                tracking::mixer_detector::validate_mixer_corpus(&path).map_err(to_io_error)?;
             let output = serde_json::to_string_pretty(&report).map_err(to_io_error)?;
             println!("{output}");
             Ok(Some(0))

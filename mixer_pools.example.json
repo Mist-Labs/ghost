@@ -1,0 +1,12 @@
+[
+  {
+    "address": "0x47ce0c6ed5b0ce3d3a51fdb1c52dc66a7c3c2936",
+    "label": "tornado_cash",
+    "denomination_eth": 1.0
+  },
+  {
+    "address": "0x00000000000000000000000000000000000000cc",
+    "label": "railgun",
+    "denomination_eth": 0.0
+  }
+]

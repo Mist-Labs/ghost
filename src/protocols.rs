@@ -117,6 +117,8 @@ pub struct RouterSimulationDefinition {
     pub quoter: Option<Address>,
     #[serde(default)]
     pub wrapped_native: Option<Address>,
+    #[serde(default)]
+    pub factory: Option<Address>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -124,6 +126,8 @@ pub struct RouterSimulationDefinition {
 pub enum RouterKind {
     UniswapV2,
     UniswapV3,
+    Aerodrome,
+    BalancerV2,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -156,6 +160,10 @@ pub struct MarketPathDefinition {
     pub intermediate_tokens: Vec<Address>,
     #[serde(default)]
     pub fee_tiers: Vec<u32>,
+    #[serde(default)]
+    pub stable_hops: Vec<bool>,
+    #[serde(default)]
+    pub pool_ids: Vec<String>,
     #[serde(default)]
     pub amount_in: Option<String>,
     #[serde(default)]

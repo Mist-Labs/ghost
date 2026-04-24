@@ -1,0 +1,14 @@
+[
+  {
+    "address": "0x4200000000000000000000000000000000000010",
+    "bridge": "base_standard_bridge"
+  },
+  {
+    "address": "0x4200000000000000000000000000000000000007",
+    "bridge": "base_l2_cross_domain_messenger"
+  },
+  {
+    "address": "0x00000000000000000000000000000000000000bb",
+    "bridge": "custom_protocol_bridge"
+  }
+]

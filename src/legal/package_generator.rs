@@ -7,7 +7,10 @@ pub struct ExploitReport {
     pub total_drained: u128,
     pub attacker_profile: serde_json::Value,
     pub wallet_tree: Vec<serde_json::Value>,
+    pub corpus_provenance: serde_json::Value,
+    pub bridge_transfers: Vec<serde_json::Value>,
     pub cex_deposits: Vec<serde_json::Value>,
+    pub mixer_entries: Vec<serde_json::Value>,
     pub geo_result: Option<serde_json::Value>,
     pub jurisdiction: String,
     pub evidence_hashes: Vec<EvidenceArtifact>,
@@ -79,7 +82,10 @@ fn render_pdf_from_html(html: &str) -> Result<Vec<u8>> {
 fn render_legal_template(report: &ExploitReport) -> Result<String> {
     let attacker_profile = pretty_json(&report.attacker_profile)?;
     let wallet_tree = pretty_json(&serde_json::to_value(&report.wallet_tree)?)?;
+    let corpus_provenance = pretty_json(&report.corpus_provenance)?;
+    let bridge_transfers = pretty_json(&serde_json::to_value(&report.bridge_transfers)?)?;
     let cex_deposits = pretty_json(&serde_json::to_value(&report.cex_deposits)?)?;
+    let mixer_entries = pretty_json(&serde_json::to_value(&report.mixer_entries)?)?;
     let geo_result = pretty_json(&serde_json::to_value(&report.geo_result)?)?;
     let evidence_rows = report
         .evidence_hashes
@@ -160,10 +166,16 @@ fn render_legal_template(report: &ExploitReport) -> Result<String> {
   <h2>Attacker Attribution</h2>
   <h3>Attacker Profile</h3>
   <pre>{attacker_profile}</pre>
+  <h3>Corpus Provenance</h3>
+  <pre>{corpus_provenance}</pre>
   <h3>Wallet Graph</h3>
   <pre>{wallet_tree}</pre>
+  <h3>Bridge Transfers</h3>
+  <pre>{bridge_transfers}</pre>
   <h3>CEX Deposits</h3>
   <pre>{cex_deposits}</pre>
+  <h3>Mixer Entries</h3>
+  <pre>{mixer_entries}</pre>
   <h3>Geolocation Assessment</h3>
   <pre>{geo_result}</pre>
 
@@ -204,11 +216,11 @@ fn render_legal_template(report: &ExploitReport) -> Result<String> {
     <li>Available evidence includes wallet graph, exchange deposit tracing, geolocation signals, artifact checksums, and verifier job metadata.</li>
   </ul>
 
-  <h2>Europol EC3 Referral Draft</h2>
+  <h2>National Cybercrime Referral With EC3 Coordination Note</h2>
   <ul>
-    <li>Cross-border digital asset theft indicators may apply depending on exchange routing and wallet attribution shown above.</li>
-    <li>Jurisdiction signal recorded by Ghost: {jurisdiction}.</li>
-    <li>Artifact appendix preserves integrity data required for independent verification.</li>
+    <li>Primary filing path should be the relevant national cybercrime authority or police intake, not a direct public submission to Europol.</li>
+    <li>EC3 coordination may be appropriate when the evidence shows cross-border EU links, multi-member-state routing, or exchange activity spanning jurisdictions.</li>
+    <li>Jurisdiction signal recorded by Ghost: {jurisdiction}. Artifact appendix preserves integrity data required for independent verification and onward coordination.</li>
   </ul>
 </body>
 </html>"#,
@@ -218,8 +230,11 @@ fn render_legal_template(report: &ExploitReport) -> Result<String> {
         artifact_count = report.evidence_hashes.len(),
         verification_count = report.verifications.len(),
         attacker_profile = attacker_profile,
+        corpus_provenance = corpus_provenance,
         wallet_tree = wallet_tree,
+        bridge_transfers = bridge_transfers,
         cex_deposits = cex_deposits,
+        mixer_entries = mixer_entries,
         geo_result = geo_result,
         evidence_rows = evidence_rows,
         verification_rows = verification_rows,

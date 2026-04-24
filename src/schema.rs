@@ -17,6 +17,7 @@ diesel::table! {
         detected_at -> Timestamptz,
         last_updated_at -> Timestamptz,
         signals -> Jsonb,
+        corpus_provenance -> Jsonb,
         raw_transaction -> Jsonb,
         summary -> Nullable<Text>,
     }
@@ -309,6 +310,26 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    use diesel::sql_types::*;
+    use diesel::sql_types::Jsonb;
+
+    filing_submissions (id) {
+        id -> Uuid,
+        incident_id -> Uuid,
+        artifact_kind -> Text,
+        filing_target -> Text,
+        destination -> Text,
+        status -> Text,
+        request_payload -> Jsonb,
+        response_status_code -> Nullable<Int4>,
+        response_body -> Nullable<Text>,
+        error_message -> Nullable<Text>,
+        submitted_at -> Timestamptz,
+        completed_at -> Nullable<Timestamptz>,
+    }
+}
+
 diesel::joinable!(incident_artifacts -> incidents (incident_id));
 diesel::joinable!(vulnerability_signatures -> hack_intel_reports (derived_from_report_id));
 diesel::joinable!(protocol_findings -> protocol_scan_runs (scan_run_id));
@@ -318,6 +339,7 @@ diesel::joinable!(billing_invoices -> incidents (incident_id));
 diesel::joinable!(billing_invoices -> recovery_cases (recovery_case_id));
 diesel::joinable!(intel_reports -> incidents (incident_id));
 diesel::joinable!(verification_jobs -> incidents (incident_id));
+diesel::joinable!(filing_submissions -> incidents (incident_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     incidents,
@@ -335,4 +357,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     intel_subscribers,
     verification_jobs,
     security_reports,
+    filing_submissions,
 );

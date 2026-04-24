@@ -1,14 +1,14 @@
 use crate::config::Config;
 use crate::protocols::{
     FlashLoanProviderDefinition, FlashLoanProviderKind, MarketPathDefinition, ProtocolDefinition,
-    RouterKind, SimulationProfile,
+    RouterKind, RouterSimulationDefinition, SimulationProfile,
 };
 use anyhow::{anyhow, Context, Result};
 use ethers::abi::AbiParser;
 use ethers::contract::Contract;
 use ethers::providers::{Http, Middleware, Provider};
 use ethers::types::{
-    Address, BlockId, BlockNumber, Bytes, Transaction, TransactionReceipt, H256, U256, U64,
+    Address, BlockId, BlockNumber, Bytes, Transaction, TransactionReceipt, H256, I256, U256, U64,
 };
 use ethers::utils::{Anvil, AnvilInstance};
 use serde::Serialize;
@@ -348,6 +348,13 @@ where
                 router.address
             ));
         }
+        if path_count > 0 && router.kind == RouterKind::Aerodrome && router.factory.is_none() {
+            warnings.push(format!(
+                "simulation router {} at {:?} is missing a factory for configured routes",
+                router_kind_label(router.kind),
+                router.address
+            ));
+        }
         if path_count > 0 && matches!(quoter_deployed, Some(false)) {
             warnings.push(format!(
                 "simulation quoter for {} at {:?} has no deployed code",
@@ -365,7 +372,10 @@ where
             healthy: deployed
                 && !(path_count > 0
                     && router.kind == RouterKind::UniswapV3
-                    && matches!(quoter_deployed, Some(false) | None)),
+                    && matches!(quoter_deployed, Some(false) | None))
+                && !(path_count > 0
+                    && router.kind == RouterKind::Aerodrome
+                    && router.factory.is_none()),
         });
     }
 
@@ -549,6 +559,12 @@ where
             RouterKind::UniswapV3 => {
                 quote_uniswap_v3(provider, router.quoter, path, amount_in, block_number).await?
             }
+            RouterKind::Aerodrome => {
+                quote_aerodrome(provider, router, path, amount_in, block_number).await?
+            }
+            RouterKind::BalancerV2 => {
+                quote_balancer_v2(provider, router.address, path, amount_in, block_number).await?
+            }
         };
 
         if let Some(quote) = quote {
@@ -677,12 +693,32 @@ async fn run_market_probe_on_fork(
                 )
                 .await?
             }
+            RouterKind::Aerodrome => {
+                quote_aerodrome(
+                    &fork.provider,
+                    router,
+                    path,
+                    amount_in,
+                    Some(fork.fork_block_number),
+                )
+                .await?
+            }
+            RouterKind::BalancerV2 => {
+                quote_balancer_v2(
+                    &fork.provider,
+                    router.address,
+                    path,
+                    amount_in,
+                    Some(fork.fork_block_number),
+                )
+                .await?
+            }
         };
         let balance_before = fork
             .token_balance(token_out, caller, Some(fork.fork_block_number))
             .await
             .unwrap_or_default();
-        let execution = execute_market_path(fork, router.address, path, caller, amount_in).await;
+        let execution = execute_market_path(fork, router, path, caller, amount_in).await;
         let balance_after = fork
             .token_balance(token_out, caller, None)
             .await
@@ -758,19 +794,205 @@ async fn ensure_token_balance_on_fork(
 
 async fn execute_market_path(
     fork: &ForkContext,
-    router: Address,
+    router: &RouterSimulationDefinition,
     path: &MarketPathDefinition,
     caller: Address,
     amount_in: U256,
 ) -> Result<TransactionReceipt> {
     match path.router_kind {
         RouterKind::UniswapV2 => {
-            execute_uniswap_v2_path(fork, router, path, caller, amount_in).await
+            execute_uniswap_v2_path(fork, router.address, path, caller, amount_in).await
         }
         RouterKind::UniswapV3 => {
-            execute_uniswap_v3_path(fork, router, path, caller, amount_in).await
+            execute_uniswap_v3_path(fork, router.address, path, caller, amount_in).await
+        }
+        RouterKind::Aerodrome => {
+            execute_aerodrome_path(fork, router, path, caller, amount_in).await
+        }
+        RouterKind::BalancerV2 => {
+            execute_balancer_v2_path(fork, router.address, path, caller, amount_in).await
         }
     }
+}
+
+async fn execute_balancer_v2_path(
+    fork: &ForkContext,
+    vault: Address,
+    path: &MarketPathDefinition,
+    caller: Address,
+    amount_in: U256,
+) -> Result<TransactionReceipt> {
+    let pool_ids = balancer_pool_ids(path)?;
+    if pool_ids.len() != 1 {
+        return Err(anyhow!(
+            "Balancer v2 execution currently supports single-hop routes only"
+        ));
+    }
+
+    let abi = AbiParser::default().parse(&[
+        "function swap((bytes32 poolId,uint8 kind,address assetIn,address assetOut,uint256 amount,bytes userData) singleSwap,(address sender,bool fromInternalBalance,address recipient,bool toInternalBalance) funds,uint256 limit,uint256 deadline) payable returns (uint256)",
+    ])?;
+    let contract = Contract::new(vault, abi, Arc::new(fork.provider.clone()));
+    let calldata = contract
+        .method::<_, U256>(
+            "swap",
+            (
+                (
+                    pool_ids[0],
+                    0_u8,
+                    path.token_in,
+                    path.token_out,
+                    amount_in,
+                    Bytes::default(),
+                ),
+                (caller, false, caller, false),
+                amount_in,
+                U256::from(chrono::Utc::now().timestamp().saturating_add(3600) as u64),
+            ),
+        )?
+        .calldata()
+        .ok_or_else(|| anyhow!("failed to encode Balancer v2 swap calldata"))?;
+    fork.send_calldata_from(caller, vault, calldata, Some(U256::from(2_000_000_u64)))
+        .await
+}
+
+async fn execute_aerodrome_path(
+    fork: &ForkContext,
+    router: &RouterSimulationDefinition,
+    path: &MarketPathDefinition,
+    caller: Address,
+    amount_in: U256,
+) -> Result<TransactionReceipt> {
+    let abi = AbiParser::default().parse(&[
+        "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, (address from,address to,bool stable,address factory)[] routes, address to, uint256 deadline) returns (uint256[])",
+    ])?;
+    let contract = Contract::new(router.address, abi, Arc::new(fork.provider.clone()));
+    let calldata = contract
+        .method::<_, Vec<U256>>(
+            "swapExactTokensForTokens",
+            (
+                amount_in,
+                U256::zero(),
+                aerodrome_routes(path, router)?,
+                caller,
+                U256::from(chrono::Utc::now().timestamp().saturating_add(3600) as u64),
+            ),
+        )?
+        .calldata()
+        .ok_or_else(|| anyhow!("failed to encode Aerodrome swap calldata"))?;
+    fork.send_calldata_from(
+        caller,
+        router.address,
+        calldata,
+        Some(U256::from(2_000_000_u64)),
+    )
+    .await
+}
+
+async fn quote_aerodrome<M: Middleware + Clone + 'static>(
+    provider: &M,
+    router: &RouterSimulationDefinition,
+    path: &MarketPathDefinition,
+    amount_in: U256,
+    block_number: Option<u64>,
+) -> Result<Option<U256>>
+where
+    <M as Middleware>::Error: 'static,
+{
+    let abi = AbiParser::default().parse(&[
+        "function getAmountsOut(uint256 amountIn, (address from,address to,bool stable,address factory)[] routes) view returns (uint256[])",
+    ])?;
+    let contract = Contract::new(router.address, abi, Arc::new(provider.clone()));
+    let mut call = contract.method::<_, Vec<U256>>(
+        "getAmountsOut",
+        (amount_in, aerodrome_routes(path, router)?),
+    )?;
+    if let Some(block_number) = block_number {
+        call = call.block(block_number);
+    }
+    match call.call().await {
+        Ok(amounts) => Ok(amounts.last().copied()),
+        Err(_) => Ok(None),
+    }
+}
+
+async fn quote_balancer_v2<M: Middleware + Clone + 'static>(
+    provider: &M,
+    vault: Address,
+    path: &MarketPathDefinition,
+    amount_in: U256,
+    block_number: Option<u64>,
+) -> Result<Option<U256>>
+where
+    <M as Middleware>::Error: 'static,
+{
+    let abi = AbiParser::default().parse(&[
+        "function queryBatchSwap(uint8 kind,(bytes32 poolId,uint256 assetInIndex,uint256 assetOutIndex,uint256 amount,bytes userData)[] swaps,address[] assets,(address sender,bool fromInternalBalance,address recipient,bool toInternalBalance) funds) returns (int256[])",
+    ])?;
+    let contract = Contract::new(vault, abi, Arc::new(provider.clone()));
+    let assets = balancer_assets(path);
+    let swaps = balancer_swaps(path, amount_in)?;
+    let mut call = contract.method::<_, Vec<I256>>(
+        "queryBatchSwap",
+        (
+            0_u8,
+            swaps,
+            assets.clone(),
+            (Address::zero(), false, Address::zero(), false),
+        ),
+    )?;
+    if let Some(block_number) = block_number {
+        call = call.block(block_number);
+    }
+
+    match call.call().await {
+        Ok(deltas) => Ok(deltas.last().and_then(|delta| {
+            if delta.is_negative() {
+                Some(delta.unsigned_abs())
+            } else {
+                None
+            }
+        })),
+        Err(_) => Ok(None),
+    }
+}
+
+fn aerodrome_routes(
+    path: &MarketPathDefinition,
+    router: &RouterSimulationDefinition,
+) -> Result<Vec<(Address, Address, bool, Address)>> {
+    let tokens = full_route(path);
+    if tokens.len() < 2 {
+        return Err(anyhow!("aerodrome path requires at least two tokens"));
+    }
+    let stable_hops = hop_stables(path)?;
+    let factory = router.factory.unwrap_or_default();
+    Ok(tokens
+        .windows(2)
+        .enumerate()
+        .map(|(index, hop)| (hop[0], hop[1], stable_hops[index], factory))
+        .collect())
+}
+
+fn hop_stables(path: &MarketPathDefinition) -> Result<Vec<bool>> {
+    let hop_count = full_route(path).len().saturating_sub(1);
+    if path.stable_hops.is_empty() {
+        return Ok(vec![false; hop_count]);
+    }
+    if path.stable_hops.len() != hop_count {
+        return Err(anyhow!(
+            "stable_hops count must match route hop count for {}",
+            path.label
+        ));
+    }
+    Ok(path.stable_hops.clone())
+}
+
+fn full_route(path: &MarketPathDefinition) -> Vec<Address> {
+    let mut route = vec![path.token_in];
+    route.extend(path.intermediate_tokens.iter().copied());
+    route.push(path.token_out);
+    route
 }
 
 async fn execute_uniswap_v2_path(
@@ -902,14 +1124,17 @@ where
         RouterKind::UniswapV3 => {
             quote_uniswap_v3(provider, router.quoter, path, amount_in, block_number).await
         }
+        RouterKind::Aerodrome => {
+            quote_aerodrome(provider, router, path, amount_in, block_number).await
+        }
+        RouterKind::BalancerV2 => {
+            quote_balancer_v2(provider, router.address, path, amount_in, block_number).await
+        }
     }
 }
 
 fn v2_route(path: &MarketPathDefinition) -> Vec<Address> {
-    let mut route = vec![path.token_in];
-    route.extend(path.intermediate_tokens.iter().copied());
-    route.push(path.token_out);
-    route
+    full_route(path)
 }
 
 fn encode_uniswap_v3_path(path: &MarketPathDefinition) -> Result<Bytes> {
@@ -949,6 +1174,50 @@ fn matching_paths(
         .iter()
         .filter(|path| path.token_in == token_in && path.token_out == token_out)
         .collect()
+}
+
+fn balancer_assets(path: &MarketPathDefinition) -> Vec<Address> {
+    full_route(path)
+}
+
+fn balancer_pool_ids(path: &MarketPathDefinition) -> Result<Vec<H256>> {
+    let hop_count = full_route(path).len().saturating_sub(1);
+    if path.pool_ids.len() != hop_count {
+        return Err(anyhow!(
+            "balancer pool_ids count must match route hop count for {}",
+            path.label
+        ));
+    }
+
+    path.pool_ids
+        .iter()
+        .map(|pool_id| {
+            pool_id
+                .parse::<H256>()
+                .with_context(|| format!("invalid Balancer pool id {} for {}", pool_id, path.label))
+        })
+        .collect()
+}
+
+fn balancer_swaps(
+    path: &MarketPathDefinition,
+    amount_in: U256,
+) -> Result<Vec<(H256, U256, U256, U256, Bytes)>> {
+    let pool_ids = balancer_pool_ids(path)?;
+
+    Ok(pool_ids
+        .into_iter()
+        .enumerate()
+        .map(|(index, pool_id)| {
+            (
+                pool_id,
+                U256::from(index),
+                U256::from(index + 1),
+                if index == 0 { amount_in } else { U256::zero() },
+                Bytes::default(),
+            )
+        })
+        .collect::<Vec<_>>())
 }
 
 #[derive(Debug, Clone)]
@@ -1085,12 +1354,14 @@ fn router_kind_label(kind: RouterKind) -> &'static str {
     match kind {
         RouterKind::UniswapV2 => "uniswap_v2",
         RouterKind::UniswapV3 => "uniswap_v3",
+        RouterKind::Aerodrome => "aerodrome",
+        RouterKind::BalancerV2 => "balancer_v2",
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_market_probe_amount, required_whale_amounts};
+    use super::{hop_stables, parse_market_probe_amount, required_whale_amounts};
     use crate::protocols::{MarketPathDefinition, RouterKind, SimulationProfile};
     use ethers::types::{Address, U256};
 
@@ -1117,6 +1388,8 @@ mod tests {
                     token_out: token_b,
                     intermediate_tokens: Vec::new(),
                     fee_tiers: Vec::new(),
+                    stable_hops: Vec::new(),
+                    pool_ids: Vec::new(),
                     amount_in: Some("100".into()),
                     slippage_bps: None,
                 },
@@ -1127,6 +1400,8 @@ mod tests {
                     token_out: token_c,
                     intermediate_tokens: Vec::new(),
                     fee_tiers: vec![500],
+                    stable_hops: Vec::new(),
+                    pool_ids: Vec::new(),
                     amount_in: Some("250".into()),
                     slippage_bps: None,
                 },
@@ -1137,6 +1412,8 @@ mod tests {
                     token_out: token_c,
                     intermediate_tokens: Vec::new(),
                     fee_tiers: Vec::new(),
+                    stable_hops: Vec::new(),
+                    pool_ids: Vec::new(),
                     amount_in: None,
                     slippage_bps: None,
                 },
@@ -1149,6 +1426,27 @@ mod tests {
         assert_eq!(
             required.get(&token_b),
             Some(&U256::from_dec_str("1000000000000000000").expect("constant should parse"))
+        );
+    }
+
+    #[test]
+    fn aerodrome_paths_default_to_volatile_hops() {
+        let path = MarketPathDefinition {
+            label: "aero".into(),
+            router_kind: RouterKind::Aerodrome,
+            token_in: Address::from_low_u64_be(0x11),
+            token_out: Address::from_low_u64_be(0x22),
+            intermediate_tokens: vec![Address::from_low_u64_be(0x33)],
+            fee_tiers: Vec::new(),
+            stable_hops: Vec::new(),
+            pool_ids: Vec::new(),
+            amount_in: None,
+            slippage_bps: None,
+        };
+
+        assert_eq!(
+            hop_stables(&path).expect("stable hops should default"),
+            vec![false, false]
         );
     }
 }

@@ -1,10 +1,12 @@
 use crate::artifacts::ArtifactStore;
 use crate::config::Config;
 use crate::db::PgPool;
+use crate::intelligence::bridge_corpus::BridgeCorpusState;
 use crate::notifications::NotificationService;
 use crate::protocols::ProtocolRegistry;
 use crate::tracking::cex_surveillance::CexCorpusState;
 use crate::tracking::fund_tracker::FundTracker;
+use crate::tracking::mixer_detector::MixerCorpusState;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -20,4 +22,6 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub fund_tracker: FundTracker,
     pub cex_wallets: Arc<RwLock<CexCorpusState>>,
+    pub bridge_corpus: Arc<RwLock<BridgeCorpusState>>,
+    pub mixer_corpus: Arc<RwLock<MixerCorpusState>>,
 }

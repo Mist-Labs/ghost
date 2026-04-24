@@ -4,12 +4,14 @@ use crate::db::{
 use crate::detection::*;
 use crate::intelligence::fingerprint::build_fingerprint;
 use crate::intelligence::geolocate::geolocate_attack_tx;
+use crate::legal::export_bundle::generate_legal_exports;
+use crate::legal::filing_dispatch::dispatch_legal_exports;
 use crate::legal::package_generator::{
     generate_legal_package, EvidenceArtifact, ExploitReport, VerificationEvidence,
 };
 use crate::model::{Incident, NewArtifact, NewIncident};
 use crate::state::AppState;
-use crate::tracking::fund_tracker::TrackingContext;
+use crate::tracking::fund_tracker::{IncidentCorpusSnapshot, TrackingContext};
 use crate::verification::mugen::submit_verification;
 use anyhow::Result;
 use chrono::Utc;
@@ -82,6 +84,13 @@ pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) ->
             "overshoot_pct": economic.overshoot_pct,
         }
     });
+    let corpus_snapshot = IncidentCorpusSnapshot::capture(
+        &state.cex_wallets,
+        &state.bridge_corpus,
+        &state.mixer_corpus,
+    )
+    .await;
+    let corpus_provenance = serde_json::to_value(corpus_snapshot.provenance())?;
 
     let protocol = score_result.protocol.clone().unwrap();
     let new_incident = NewIncident {
@@ -98,6 +107,7 @@ pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) ->
         detected_at,
         last_updated_at: detected_at,
         signals: signal_payload.clone(),
+        corpus_provenance: corpus_provenance.clone(),
         raw_transaction: raw_transaction.clone(),
         summary: Some(format!(
             "{} candidate exploit on {} with {} signal(s)",
@@ -161,7 +171,7 @@ pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) ->
         .start_tracking(
             tx.from,
             state.ws_provider.clone(),
-            state.cex_wallets.clone(),
+            corpus_snapshot,
             TrackingContext {
                 incident_id: incident.id,
                 exploit_tx_hash: format!("{:?}", tx.hash),
@@ -226,11 +236,36 @@ async fn build_intelligence_artifacts(
     let Some(tx_hash) = tx_hash_hex.parse().ok() else {
         return Ok(());
     };
+    let corpus_snapshot = match state
+        .fund_tracker
+        .incident_corpus_snapshot(incident.id)
+        .await
+    {
+        Some(snapshot) => snapshot,
+        None => {
+            IncidentCorpusSnapshot::capture(
+                &state.cex_wallets,
+                &state.bridge_corpus,
+                &state.mixer_corpus,
+            )
+            .await
+        }
+    };
 
     let profile = if state.config.basescan_api_key.is_some() {
-        build_fingerprint(attacker, tx_hash, &state.provider)
-            .await
-            .ok()
+        let cex_wallets = corpus_snapshot.cex.wallets.clone();
+        let bridge_corpus = corpus_snapshot.bridge.clone();
+        let mixer_corpus = corpus_snapshot.mixer.clone();
+        build_fingerprint(
+            attacker,
+            tx_hash,
+            &state.provider,
+            Some(&cex_wallets),
+            Some(&bridge_corpus),
+            Some(&mixer_corpus),
+        )
+        .await
+        .ok()
     } else {
         None
     };
@@ -251,29 +286,28 @@ async fn build_intelligence_artifacts(
         _ => None,
     };
 
-    let cex_deposits = state.fund_tracker.cex_deposits.read().await.clone();
-    let wallet_tree = state
+    let cex_deposits = state.fund_tracker.incident_cex_deposits(&tx_hash_hex).await;
+    let bridge_transfers = state
         .fund_tracker
-        .tree
-        .read()
-        .await
-        .iter()
-        .map(|(from, tos)| {
-            serde_json::json!({
-                "from": format!("{from:?}"),
-                "to": tos.iter().map(|address| format!("{address:?}")).collect::<Vec<_>>(),
-            })
-        })
-        .collect::<Vec<_>>();
+        .incident_bridge_transfers(&tx_hash_hex)
+        .await;
+    let mixer_entries = state
+        .fund_tracker
+        .incident_mixer_entries(&tx_hash_hex)
+        .await;
+    let wallet_tree = state.fund_tracker.incident_wallet_tree(incident.id).await;
 
     let intelligence_payload = serde_json::json!({
         "incident_id": incident.id,
         "tx_hash": tx_hash_hex,
         "attacker": format!("{attacker:?}"),
+        "corpus_provenance": incident.corpus_provenance.clone(),
         "profile": profile,
         "geo_result": geo_result,
         "wallet_tree": wallet_tree,
+        "bridge_transfers": bridge_transfers,
         "cex_deposits": cex_deposits,
+        "mixer_entries": mixer_entries,
     });
 
     let stored = state
@@ -317,42 +351,53 @@ async fn build_intelligence_artifacts(
         let verification_jobs = list_verification_jobs_for_incident(&mut conn, incident.id).await?;
         (artifacts, verification_jobs)
     };
-    let legal_package = generate_legal_package(&ExploitReport {
+    let evidence_artifacts: Vec<EvidenceArtifact> = artifacts
+        .into_iter()
+        .map(|artifact| EvidenceArtifact {
+            kind: artifact.kind,
+            storage_backend: artifact.storage_backend,
+            locator: artifact.locator,
+            checksum_sha256: artifact.checksum_sha256,
+            content_type: artifact.content_type,
+            created_at: artifact.created_at.to_rfc3339(),
+        })
+        .collect();
+    let verification_evidence: Vec<VerificationEvidence> = verification_jobs
+        .into_iter()
+        .map(|job| VerificationEvidence {
+            provider: job.provider,
+            external_job_id: job.external_job_id,
+            status: job.status,
+            proof_hash: job.proof_hash,
+            vkey: job.vkey,
+            output_score: job.output_score,
+            settled_at: job.settled_at.map(|value| value.to_rfc3339()),
+        })
+        .collect();
+    let exploit_report = ExploitReport {
         tx_hash: tx_hash_hex,
         total_drained,
         attacker_profile,
         wallet_tree,
+        corpus_provenance: incident.corpus_provenance.clone(),
+        bridge_transfers: serde_json::to_value(bridge_transfers)?
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
         cex_deposits: serde_json::to_value(cex_deposits)?
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+        mixer_entries: serde_json::to_value(mixer_entries)?
             .as_array()
             .cloned()
             .unwrap_or_default(),
         geo_result: geo_json,
         jurisdiction: incident.chain_name.clone(),
-        evidence_hashes: artifacts
-            .into_iter()
-            .map(|artifact| EvidenceArtifact {
-                kind: artifact.kind,
-                storage_backend: artifact.storage_backend,
-                locator: artifact.locator,
-                checksum_sha256: artifact.checksum_sha256,
-                content_type: artifact.content_type,
-                created_at: artifact.created_at.to_rfc3339(),
-            })
-            .collect(),
-        verifications: verification_jobs
-            .into_iter()
-            .map(|job| VerificationEvidence {
-                provider: job.provider,
-                external_job_id: job.external_job_id,
-                status: job.status,
-                proof_hash: job.proof_hash,
-                vkey: job.vkey,
-                output_score: job.output_score,
-                settled_at: job.settled_at.map(|value| value.to_rfc3339()),
-            })
-            .collect(),
-    })
-    .await?;
+        evidence_hashes: evidence_artifacts.clone(),
+        verifications: verification_evidence.clone(),
+    };
+    let legal_package = generate_legal_package(&exploit_report).await?;
     let stored = state
         .artifact_store
         .persist_bytes(
@@ -361,6 +406,14 @@ async fn build_intelligence_artifacts(
             &legal_package,
         )
         .await?;
+    let legal_package_evidence = EvidenceArtifact {
+        kind: "legal_package".into(),
+        storage_backend: stored.backend.clone(),
+        locator: stored.locator.clone(),
+        checksum_sha256: stored.checksum_sha256.clone(),
+        content_type: stored.content_type.clone(),
+        created_at: Utc::now().to_rfc3339(),
+    };
     let mut conn = state.pool.get().await?;
     insert_artifact(
         &mut conn,
@@ -376,5 +429,64 @@ async fn build_intelligence_artifacts(
     )
     .await?;
 
+    let mut export_inventory = evidence_artifacts;
+    export_inventory.push(legal_package_evidence);
+    let export_bundle = generate_legal_exports(
+        &incident,
+        &exploit_report,
+        &export_inventory,
+        &verification_evidence,
+    )?;
+    drop(conn);
+    persist_incident_export_artifact(
+        &state,
+        incident.id,
+        "legal_export_manifest",
+        &export_bundle.manifest,
+    )
+    .await?;
+    persist_incident_export_artifact(
+        &state,
+        incident.id,
+        "ic3_complaint_draft",
+        &export_bundle.ic3_complaint_draft,
+    )
+    .await?;
+    persist_incident_export_artifact(
+        &state,
+        incident.id,
+        "ec3_coordination_referral_draft",
+        &export_bundle.ec3_coordination_referral_draft,
+    )
+    .await?;
+    let _ = dispatch_legal_exports(&state, incident.id, &export_bundle).await?;
+
+    Ok(())
+}
+
+async fn persist_incident_export_artifact(
+    state: &AppState,
+    incident_id: uuid::Uuid,
+    kind: &str,
+    payload: &serde_json::Value,
+) -> Result<()> {
+    let stored = state
+        .artifact_store
+        .persist_json(&format!("incident-{kind}-{}", incident_id), payload)
+        .await?;
+    let mut conn = state.pool.get().await?;
+    insert_artifact(
+        &mut conn,
+        &NewArtifact {
+            incident_id,
+            kind: kind.to_string(),
+            storage_backend: stored.backend,
+            locator: stored.locator,
+            checksum_sha256: stored.checksum_sha256,
+            content_type: stored.content_type,
+            size_bytes: stored.size_bytes,
+        },
+    )
+    .await?;
     Ok(())
 }

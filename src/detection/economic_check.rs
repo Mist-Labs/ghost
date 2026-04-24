@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::protocols::ProtocolDefinition;
+use crate::protocols::{DependencyKind, ProtocolDefinition};
 use crate::simulation::{quote_expected_output, ForkContext};
 use anyhow::{anyhow, Result};
 use ethers::abi::{AbiParser, RawLog};
@@ -292,9 +292,19 @@ where
             simulate_amm_output(protocol, provider, flows, block_number, protocol_definition).await
         }
         ProtocolType::Lending => {
-            get_max_borrowable(protocol, provider, user, flows, block_number).await
+            get_max_borrowable(
+                protocol,
+                provider,
+                user,
+                flows,
+                block_number,
+                protocol_definition,
+            )
+            .await
         }
-        ProtocolType::Vault => get_share_value(protocol, provider, flows, block_number).await,
+        ProtocolType::Vault => {
+            get_share_value(protocol, provider, flows, block_number, protocol_definition).await
+        }
         ProtocolType::Unknown => Ok(None),
     }
 }
@@ -405,6 +415,94 @@ async fn get_max_borrowable<M: Middleware + Clone + 'static>(
     user: Address,
     flows: &TokenFlows,
     block_number: Option<u64>,
+    protocol_definition: Option<&ProtocolDefinition>,
+) -> Result<Option<f64>>
+where
+    <M as Middleware>::Error: 'static,
+{
+    for address in lending_probe_addresses(protocol, protocol_definition) {
+        if let Some(available) =
+            aave_available_borrow(provider, address, user, block_number).await?
+        {
+            if available > 0.0 {
+                return Ok(Some(available.min(flows.total_out_f64.max(available))));
+            }
+        }
+        if let Some(available) =
+            compound_account_liquidity(provider, address, user, block_number).await?
+        {
+            if available > 0.0 {
+                return Ok(Some(available.min(flows.total_out_f64.max(available))));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+async fn get_share_value<M: Middleware + Clone + 'static>(
+    protocol: Address,
+    provider: &M,
+    flows: &TokenFlows,
+    block_number: Option<u64>,
+    protocol_definition: Option<&ProtocolDefinition>,
+) -> Result<Option<f64>>
+where
+    <M as Middleware>::Error: 'static,
+{
+    let shares = U256::from(flows.shares_in_f64.max(0.0) as u128);
+    for address in vault_probe_addresses(protocol, protocol_definition) {
+        if let Some(value) = erc4626_asset_value(provider, address, shares, block_number).await? {
+            return Ok(Some(value));
+        }
+    }
+
+    Ok(None)
+}
+
+fn lending_probe_addresses(
+    protocol: Address,
+    protocol_definition: Option<&ProtocolDefinition>,
+) -> Vec<Address> {
+    let mut addresses = vec![protocol];
+    if let Some(protocol_definition) = protocol_definition {
+        addresses.extend(
+            protocol_definition
+                .dependencies
+                .iter()
+                .filter(|dependency| dependency.kind == DependencyKind::LendingMarket)
+                .map(|dependency| dependency.address),
+        );
+    }
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+fn vault_probe_addresses(
+    protocol: Address,
+    protocol_definition: Option<&ProtocolDefinition>,
+) -> Vec<Address> {
+    let mut addresses = vec![protocol];
+    if let Some(protocol_definition) = protocol_definition {
+        addresses.extend(
+            protocol_definition
+                .dependencies
+                .iter()
+                .filter(|dependency| dependency.kind == DependencyKind::Vault)
+                .map(|dependency| dependency.address),
+        );
+    }
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+async fn aave_available_borrow<M: Middleware + Clone + 'static>(
+    provider: &M,
+    address: Address,
+    user: Address,
+    block_number: Option<u64>,
 ) -> Result<Option<f64>>
 where
     <M as Middleware>::Error: 'static,
@@ -412,27 +510,50 @@ where
     let abi = AbiParser::default().parse(&[
         "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)",
     ])?;
-    let contract = ethers::contract::Contract::new(protocol, abi, Arc::new(provider.clone()));
+    let contract = ethers::contract::Contract::new(address, abi, Arc::new(provider.clone()));
     let mut call =
         contract.method::<_, (U256, U256, U256, U256, U256, U256)>("getUserAccountData", user)?;
     if let Some(block_number) = block_number {
         call = call.block(block_number);
     }
-    let result: (U256, U256, U256, U256, U256, U256) = match call.call().await {
-        Ok(value) => value,
-        Err(_) => return Ok(None),
-    };
-    let available = u256_to_f64(result.2);
-    if available <= 0.0 {
-        return Ok(None);
+    match call.call().await {
+        Ok(result) => Ok(Some(u256_to_f64(result.2))),
+        Err(_) => Ok(None),
     }
-    Ok(Some(available.min(flows.total_out_f64.max(available))))
 }
 
-async fn get_share_value<M: Middleware + Clone + 'static>(
-    protocol: Address,
+async fn compound_account_liquidity<M: Middleware + Clone + 'static>(
     provider: &M,
-    flows: &TokenFlows,
+    address: Address,
+    user: Address,
+    block_number: Option<u64>,
+) -> Result<Option<f64>>
+where
+    <M as Middleware>::Error: 'static,
+{
+    let abi = AbiParser::default().parse(&[
+        "function getAccountLiquidity(address account) view returns (uint256 error, uint256 liquidity, uint256 shortfall)",
+    ])?;
+    let contract = ethers::contract::Contract::new(address, abi, Arc::new(provider.clone()));
+    let mut call = contract.method::<_, (U256, U256, U256)>("getAccountLiquidity", user)?;
+    if let Some(block_number) = block_number {
+        call = call.block(block_number);
+    }
+    match call.call().await {
+        Ok((error_code, liquidity, shortfall)) => {
+            if !error_code.is_zero() || !shortfall.is_zero() {
+                return Ok(None);
+            }
+            Ok(Some(u256_to_f64(liquidity)))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+async fn erc4626_asset_value<M: Middleware + Clone + 'static>(
+    provider: &M,
+    address: Address,
+    shares: U256,
     block_number: Option<u64>,
 ) -> Result<Option<f64>>
 where
@@ -441,16 +562,20 @@ where
     let abi = AbiParser::default().parse(&[
         "function convertToAssets(uint256 shares) view returns (uint256)",
         "function previewRedeem(uint256 shares) view returns (uint256)",
+        "function totalAssets() view returns (uint256)",
+        "function totalSupply() view returns (uint256)",
     ])?;
-    let contract =
-        ethers::contract::Contract::new(protocol, abi.clone(), Arc::new(provider.clone()));
-    let shares = U256::from(flows.shares_in_f64.max(0.0) as u128);
+    let contract = ethers::contract::Contract::new(address, abi, Arc::new(provider.clone()));
 
     let mut convert = contract.method::<_, U256>("convertToAssets", shares)?;
     let mut preview = contract.method::<_, U256>("previewRedeem", shares)?;
+    let mut total_assets = contract.method::<_, U256>("totalAssets", ())?;
+    let mut total_supply = contract.method::<_, U256>("totalSupply", ())?;
     if let Some(block_number) = block_number {
         convert = convert.block(block_number);
         preview = preview.block(block_number);
+        total_assets = total_assets.block(block_number);
+        total_supply = total_supply.block(block_number);
     }
 
     if let Ok(value) = convert.call().await {
@@ -458,6 +583,14 @@ where
     }
     if let Ok(value) = preview.call().await {
         return Ok(Some(u256_to_f64(value)));
+    }
+    if let (Ok(total_assets), Ok(total_supply)) =
+        (total_assets.call().await, total_supply.call().await)
+    {
+        if !total_supply.is_zero() {
+            let expected = shares.saturating_mul(total_assets) / total_supply;
+            return Ok(Some(u256_to_f64(expected)));
+        }
     }
 
     Ok(None)
