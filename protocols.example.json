@@ -1,0 +1,160 @@
+[
+  {
+    "id": "your-base-protocol",
+    "name": "Your Base Protocol",
+    "chain_id": 8453,
+    "protocol_type": "amm",
+    "monitoring_authorized": true,
+    "monitored_addresses": [
+      "0x0000000000000000000000000000000000000001"
+    ],
+    "contract_addresses": [
+      "0x0000000000000000000000000000000000000001"
+    ],
+    "security_contacts": [
+      "security@your-protocol.tld"
+    ],
+    "known_selectors": [],
+    "sanctioned_selectors": [],
+    "suspicious_selectors": [],
+    "oracle_addresses": [
+      "0x0000000000000000000000000000000000000002",
+      "0x0000000000000000000000000000000000000003"
+    ],
+    "billing": {
+      "tier": "guardian",
+      "billing_email": "finance@your-protocol.tld",
+      "alert_webhook": "https://example.com/ghost/billing-webhook",
+      "active": true
+    },
+    "upgrade_monitor": {
+      "proxy_addresses": [
+        "0x0000000000000000000000000000000000000001"
+      ],
+      "timelock_addresses": [
+        "0x0000000000000000000000000000000000000004"
+      ],
+      "timelock_lookback_blocks": 50000
+    },
+    "oracle_monitor": {
+      "require_sequencer_uptime_feed": true,
+      "minimum_sources": 2,
+      "max_cross_source_deviation_bps": 300,
+      "minimum_twap_window_secs": 1800,
+      "max_spot_vs_twap_deviation_bps": 500,
+      "feeds": [
+        {
+          "label": "eth_usd_chainlink",
+          "address": "0x0000000000000000000000000000000000000002",
+          "kind": "chainlink",
+          "pair": "ETH/USD",
+          "heartbeat_secs": 3600
+        },
+        {
+          "label": "base_sequencer",
+          "address": "0x0000000000000000000000000000000000000003",
+          "kind": "sequencer_uptime"
+        },
+        {
+          "label": "eth_usd_uniswap_twap",
+          "address": "0x0000000000000000000000000000000000000005",
+          "kind": "uniswap_v3_twap",
+          "pair": "ETH/USD",
+          "window_secs": 1800
+        }
+      ]
+    },
+    "dependencies": [
+      {
+        "name": "bridge_adapter",
+        "address": "0x0000000000000000000000000000000000000006",
+        "kind": "bridge",
+        "critical": true,
+        "expected_codehash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "name": "uniswap_router",
+        "address": "0x0000000000000000000000000000000000000007",
+        "kind": "router",
+        "critical": true
+      },
+      {
+        "name": "deposit_hook",
+        "address": "0x0000000000000000000000000000000000000008",
+        "kind": "external_hook",
+        "critical": false
+      }
+    ],
+    "simulation": {
+      "token_whales": [
+        {
+          "token": "0x0000000000000000000000000000000000000009",
+          "holder": "0x0000000000000000000000000000000000000010"
+        }
+      ],
+      "routers": [
+        {
+          "kind": "uniswap_v3",
+          "address": "0x0000000000000000000000000000000000000007",
+          "quoter": "0x0000000000000000000000000000000000000011"
+        }
+      ],
+      "flash_loan_providers": [
+        {
+          "kind": "balancer",
+          "address": "0x0000000000000000000000000000000000000012",
+          "asset": "0x0000000000000000000000000000000000000009",
+          "liquidity_holder": "0x0000000000000000000000000000000000000012"
+        }
+      ],
+      "market_paths": [
+        {
+          "label": "usdc-weth-direct",
+          "router_kind": "uniswap_v3",
+          "token_in": "0x0000000000000000000000000000000000000009",
+          "token_out": "0x000000000000000000000000000000000000000a",
+          "fee_tiers": [500],
+          "amount_in": "1000000000",
+          "slippage_bps": 100
+        }
+      ]
+    },
+    "invariants": [
+      {
+        "name": "solvency_floor",
+        "severity": "high",
+        "kind": "ratio_min",
+        "numerator": {
+          "address": "0x0000000000000000000000000000000000000001",
+          "function": "totalAssets"
+        },
+        "denominator": {
+          "address": "0x0000000000000000000000000000000000000001",
+          "function": "totalLiabilities"
+        },
+        "min_bps": 10000
+      },
+      {
+        "name": "share_price_drawdown",
+        "severity": "high",
+        "kind": "max_drawdown_bps",
+        "metric": {
+          "address": "0x0000000000000000000000000000000000000001",
+          "function": "pricePerShare"
+        },
+        "max_bps": 300
+      },
+      {
+        "name": "withdrawal_limit_band",
+        "severity": "medium",
+        "kind": "value_range",
+        "metric": {
+          "address": "0x0000000000000000000000000000000000000001",
+          "function": "withdrawalLimit"
+        },
+        "min": "1",
+        "max": "1000000000000000000000000"
+      }
+    ]
+  }
+]
