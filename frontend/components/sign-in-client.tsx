@@ -181,6 +181,8 @@ export function SignInClient({ nextPath = "/account" }: { nextPath?: string }) {
       completeAuthNavigation();
     } catch (error) {
       setBusyState("idle");
+      setOtpCode("");
+      setLastAttemptedOtpCode("");
       setNotice({
         tone: "error",
         message: error instanceof Error ? error.message : "Invalid OTP.",
@@ -346,8 +348,9 @@ export function SignInClient({ nextPath = "/account" }: { nextPath?: string }) {
             ) : null}
           </div>
 
-          {notice ? (
+          {notice && !otpModalOpen ? (
             <div
+              aria-live="polite"
               className={`rounded-2xl border px-4 py-3 text-sm ${
                 notice.tone === "error"
                   ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
@@ -385,6 +388,19 @@ export function SignInClient({ nextPath = "/account" }: { nextPath?: string }) {
 
             <p className="mt-4 text-sm leading-6 text-text-2">{normalizedEmail}</p>
 
+            {notice ? (
+              <div
+                aria-live="polite"
+                className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${
+                  notice.tone === "error"
+                    ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                    : "border-signal/30 bg-signal/[0.08] text-signal"
+                }`}
+              >
+                {notice.message}
+              </div>
+            ) : null}
+
             <div className="mt-6">
               <div className="flex items-center justify-between gap-3">
                 <label className="micro-label">Enter 6-digit code</label>
@@ -399,9 +415,12 @@ export function SignInClient({ nextPath = "/account" }: { nextPath?: string }) {
               </div>
               <input
                 value={otpCode}
-                onChange={(event) =>
-                  setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-                }
+                onChange={(event) => {
+                  if (notice?.tone === "error") {
+                    setNotice(null);
+                  }
+                  setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6));
+                }}
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 className="mt-2 w-full rounded-2xl border border-white/10 bg-[#0b1013] px-4 py-3 text-center text-sm tracking-[0.45em] text-text-1 outline-none transition focus:border-signal/40"

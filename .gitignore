@@ -23,3 +23,5 @@ dist/
 # Local project reference docs
 ghost-implementation.md
 ghost-product.md
+ghost-design-spec (1).md
+GeoLite2-City.mmdb
