@@ -16,6 +16,7 @@
 *.tmp
 *.temp
 node_modules/
+.next/
 dist/
 .turbo/
 

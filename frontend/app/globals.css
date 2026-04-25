@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --void: #050607;
+  --surface: #090d10;
+  --raised: #0e1418;
+  --hover: #131c22;
+  --border-dim: rgba(255, 255, 255, 0.05);
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text-1: #e6ebf0;
+  --text-2: #8b96a1;
+  --text-3: #4e5a63;
+  --signal: #00e676;
+  --signal-soft: rgba(0, 230, 118, 0.12);
+  --signal-panel: rgba(0, 230, 118, 0.08);
+  --danger: #ff2442;
+  --amber: #ffb300;
+  --orange: #ff6b35;
+  --blue: #4fc3f7;
+  --violet: #ce93d8;
+  --cyan: #80deea;
+}
+
+html {
+  background: var(--void);
+  color: var(--text-1);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top center, rgba(0, 230, 118, 0.05), transparent 28%),
+    radial-gradient(circle at left 20%, rgba(79, 195, 247, 0.03), transparent 24%),
+    radial-gradient(circle at right 20%, rgba(255, 255, 255, 0.025), transparent 18%),
+    linear-gradient(180deg, #050607 0%, #06090b 100%);
+  color: var(--text-1);
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 128px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: rgba(0, 230, 118, 0.22);
+  color: white;
+}
+
+@layer components {
+  .shell {
+    @apply mx-auto w-full max-w-[1240px] px-5 sm:px-8 lg:px-10;
+  }
+
+  .eyebrow {
+    @apply inline-flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.28em] text-signal;
+  }
+
+  .eyebrow-centered {
+    @apply flex justify-center;
+  }
+
+  .eyebrow::before {
+    content: "";
+    @apply inline-block h-px w-8 bg-signal;
+  }
+
+  .section-title {
+    @apply font-display text-4xl font-semibold leading-[1.02] tracking-[-0.045em] text-text-1 md:text-5xl lg:text-6xl;
+  }
+
+  .section-copy {
+    @apply max-w-3xl text-sm leading-7 text-text-2 md:text-[15px];
+  }
+
+  .page-hero {
+    @apply mx-auto max-w-4xl text-center;
+  }
+
+  .panel {
+    @apply rounded-3xl border border-white/10 bg-surface/90 shadow-panel backdrop-blur-sm;
+  }
+
+  .micro-label {
+    @apply font-mono text-[10px] uppercase tracking-[0.22em] text-text-3;
+  }
+
+  .terminal-shell {
+    @apply overflow-hidden rounded-2xl border border-white/10 bg-black shadow-panel;
+  }
+
+  .terminal-bar {
+    @apply flex h-11 items-center gap-3 border-b border-white/10 bg-[#0d1117] px-4;
+  }
+
+  .terminal-dot {
+    @apply h-3 w-3 rounded-full;
+  }
+
+  .scan-overlay {
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(255, 255, 255, 0.025) 3px,
+      rgba(255, 255, 255, 0.025) 4px
+    );
+  }
+
+  .marketing-card {
+    @apply rounded-3xl border border-white/10 bg-raised/70 p-6 backdrop-blur-sm;
+  }
+
+  .product-card {
+    @apply rounded-3xl border border-white/10 bg-[#0a0f12] p-6 shadow-panel backdrop-blur-sm;
+  }
+
+  .stat-card {
+    @apply rounded-[1.75rem] border border-white/10 bg-[#070b0d] px-6 py-5;
+  }
+
+  .subsection-title {
+    @apply font-display text-2xl font-semibold tracking-[-0.035em] text-text-1 md:text-3xl;
+  }
+}

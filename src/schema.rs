@@ -330,6 +330,69 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    use diesel::sql_types::*;
+
+    operator_accounts (id) {
+        id -> Uuid,
+        company_name -> Text,
+        contact_name -> Text,
+        email -> Text,
+        password_hash -> Text,
+        webauthn_user_id -> Text,
+        otp_enabled -> Bool,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        last_login_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    operator_sessions (id) {
+        id -> Uuid,
+        operator_account_id -> Uuid,
+        token_hash -> Text,
+        expires_at -> Timestamptz,
+        created_at -> Timestamptz,
+        last_seen_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+
+    operator_otp_codes (id) {
+        id -> Uuid,
+        operator_account_id -> Uuid,
+        purpose -> Text,
+        code_hash -> Text,
+        expires_at -> Timestamptz,
+        consumed_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use diesel::sql_types::Jsonb;
+
+    operator_passkeys (id) {
+        id -> Uuid,
+        operator_account_id -> Uuid,
+        credential_id -> Text,
+        public_key -> Text,
+        counter -> Int8,
+        transports -> Jsonb,
+        device_type -> Text,
+        backed_up -> Bool,
+        label -> Nullable<Text>,
+        created_at -> Timestamptz,
+        last_used_at -> Nullable<Timestamptz>,
+    }
+}
+
 diesel::joinable!(incident_artifacts -> incidents (incident_id));
 diesel::joinable!(vulnerability_signatures -> hack_intel_reports (derived_from_report_id));
 diesel::joinable!(protocol_findings -> protocol_scan_runs (scan_run_id));
@@ -340,6 +403,9 @@ diesel::joinable!(billing_invoices -> recovery_cases (recovery_case_id));
 diesel::joinable!(intel_reports -> incidents (incident_id));
 diesel::joinable!(verification_jobs -> incidents (incident_id));
 diesel::joinable!(filing_submissions -> incidents (incident_id));
+diesel::joinable!(operator_sessions -> operator_accounts (operator_account_id));
+diesel::joinable!(operator_otp_codes -> operator_accounts (operator_account_id));
+diesel::joinable!(operator_passkeys -> operator_accounts (operator_account_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     incidents,
@@ -358,4 +424,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     verification_jobs,
     security_reports,
     filing_submissions,
+    operator_accounts,
+    operator_sessions,
+    operator_otp_codes,
+    operator_passkeys,
 );

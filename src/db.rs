@@ -142,6 +142,26 @@ const MIGRATIONS: &[MigrationFile] = &[
         name: "create_filing_submissions",
         up_sql: include_str!("../migrations/2026-04-24-000300_create_filing_submissions/up.sql"),
     },
+    MigrationFile {
+        version: "2026-04-25-000100",
+        name: "create_operator_accounts",
+        up_sql: include_str!("../migrations/2026-04-25-000100_create_operator_accounts/up.sql"),
+    },
+    MigrationFile {
+        version: "2026-04-25-000200",
+        name: "create_operator_sessions",
+        up_sql: include_str!("../migrations/2026-04-25-000200_create_operator_sessions/up.sql"),
+    },
+    MigrationFile {
+        version: "2026-04-25-000300",
+        name: "create_operator_otp_codes",
+        up_sql: include_str!("../migrations/2026-04-25-000300_create_operator_otp_codes/up.sql"),
+    },
+    MigrationFile {
+        version: "2026-04-25-000400",
+        name: "create_operator_passkeys",
+        up_sql: include_str!("../migrations/2026-04-25-000400_create_operator_passkeys/up.sql"),
+    },
 ];
 
 pub async fn create_pool(database_url: &str) -> Result<PgPool> {

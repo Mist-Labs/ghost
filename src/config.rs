@@ -31,11 +31,13 @@ pub struct Config {
     pub smtp: Option<SmtpConfig>,
     pub keeperhub_webhook_url: Option<String>,
     pub zero_g: Option<ZeroGConfig>,
-    pub openai_api_key: Option<String>,
-    pub openai_model: String,
+    pub kimi_api_key: Option<String>,
+    pub kimi_model: String,
+    pub kimi_base_url: String,
     pub solc_binary: String,
     pub solc_bin_dir: Option<PathBuf>,
     pub anvil_binary: String,
+    pub simulation_fork_block_number: Option<u64>,
     pub simulation_startup_timeout_secs: u64,
     pub basescan_api_key: Option<String>,
     pub stripe_api_key: Option<String>,
@@ -176,16 +178,31 @@ impl Config {
         let keeperhub_webhook_url = env::var("KEEPERHUB_WEBHOOK_URL")
             .ok()
             .filter(|value| !value.trim().is_empty());
-        let openai_api_key = env::var("OPENAI_API_KEY")
+        let kimi_api_key = env::var("KIMI_API_KEY")
             .ok()
+            .or_else(|| env::var("OPENAI_API_KEY").ok())
             .filter(|value| !value.trim().is_empty());
-        let openai_model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".to_string());
+        let kimi_model = env::var("KIMI_MODEL")
+            .ok()
+            .or_else(|| env::var("OPENAI_MODEL").ok())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "kimi-k2.6".to_string());
+        let kimi_base_url = env::var("KIMI_BASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "https://api.moonshot.ai/v1".to_string());
         let solc_binary = env::var("SOLC_BINARY").unwrap_or_else(|_| "solc".to_string());
         let solc_bin_dir = env::var("SOLC_BIN_DIR")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .map(PathBuf::from);
         let anvil_binary = env::var("ANVIL_BINARY").unwrap_or_else(|_| "anvil".to_string());
+        let simulation_fork_block_number = env::var("SIMULATION_FORK_BLOCK_NUMBER")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .context("SIMULATION_FORK_BLOCK_NUMBER must be a valid u64")?;
         let simulation_startup_timeout_secs = env::var("SIMULATION_STARTUP_TIMEOUT_SECS")
             .ok()
             .map(|value| value.parse::<u64>())
@@ -259,11 +276,13 @@ impl Config {
             smtp,
             keeperhub_webhook_url,
             zero_g,
-            openai_api_key,
-            openai_model,
+            kimi_api_key,
+            kimi_model,
+            kimi_base_url,
             solc_binary,
             solc_bin_dir,
             anvil_binary,
+            simulation_fork_block_number,
             simulation_startup_timeout_secs,
             basescan_api_key,
             stripe_api_key,

@@ -148,7 +148,7 @@ async fn main() -> std::io::Result<()> {
         mixer_pools_loaded = mixer_summary.unique_addresses,
         mixer_pools_checksum = %mixer_summary.checksum_sha256,
         zero_g_enabled = matches!(state.artifact_store, crate::artifacts::ArtifactStore::ZeroG(_)),
-        openai_enabled = state.config.openai_api_key.is_some(),
+        kimi_enabled = state.config.kimi_api_key.is_some(),
         "Ghost service starting"
     );
 

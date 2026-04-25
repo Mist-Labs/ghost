@@ -269,10 +269,13 @@ impl ForkContext {
     }
 }
 
-pub async fn latest_block_number<M: Middleware>(provider: &M) -> Result<u64>
+pub async fn latest_block_number<M: Middleware>(provider: &M, config: &Config) -> Result<u64>
 where
     <M as Middleware>::Error: 'static,
 {
+    if let Some(block_number) = config.simulation_fork_block_number {
+        return Ok(block_number);
+    }
     Ok(provider.get_block_number().await?.as_u64())
 }
 
@@ -294,6 +297,7 @@ pub async fn probe_market_liquidity(
 
 pub async fn validate_protocol_simulation_profile<M: Middleware + Clone + 'static>(
     provider: &M,
+    config: &Config,
     protocol: &ProtocolDefinition,
 ) -> Result<Option<SimulationProfileValidation>>
 where
@@ -303,7 +307,7 @@ where
         return Ok(None);
     };
 
-    let checked_block_number = latest_block_number(provider).await?;
+    let checked_block_number = latest_block_number(provider, config).await?;
     let block = Some(checked_block_number);
     let mut warnings = Vec::new();
     let mut routers = Vec::new();

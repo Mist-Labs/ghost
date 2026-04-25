@@ -889,14 +889,24 @@ fn authorize(req: &HttpRequest, api_key: Option<&str>) -> Result<(), HttpRespons
     let Some(header) = req.headers().get("x-api-key") else {
         return Err(HttpResponse::Unauthorized().finish());
     };
-    let Ok(value) = header.to_str() else {
-        return Err(HttpResponse::Unauthorized().finish());
-    };
-    if value == api_key {
+    if constant_time_eq(header.as_bytes(), api_key.as_bytes()) {
         Ok(())
     } else {
         Err(HttpResponse::Unauthorized().finish())
     }
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut diff = 0u8;
+    for (lhs, rhs) in left.iter().zip(right.iter()) {
+        diff |= lhs ^ rhs;
+    }
+
+    diff == 0
 }
 
 async fn check_readiness(state: &Arc<AppState>) -> anyhow::Result<ReadinessReport> {

@@ -1,190 +1,134 @@
 [
   {
-    "id": "your-base-protocol",
-    "name": "Your Base Protocol",
+    "id": "aave-v3-base-demo",
+    "name": "Aave V3 Base (Local Demo Profile)",
     "chain_id": 8453,
-    "protocol_type": "amm",
+    "protocol_type": "lending",
     "monitoring_authorized": true,
     "monitored_addresses": [
-      "0x0000000000000000000000000000000000000001"
+      "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+      "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D",
+      "0x5731a04B1E775f0fdd454Bf70f3335886e9A96be",
+      "0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156",
+      "0xe34949A48cd2E6f5CD41753e449bd2d43993C9AC"
     ],
     "contract_addresses": [
-      "0x0000000000000000000000000000000000000001"
+      "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+      "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D",
+      "0x5731a04B1E775f0fdd454Bf70f3335886e9A96be",
+      "0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156",
+      "0xe34949A48cd2E6f5CD41753e449bd2d43993C9AC"
     ],
     "security_contacts": [
-      "security@your-protocol.tld"
+      "ghost-demo-aave@example.invalid"
     ],
     "known_selectors": [],
     "sanctioned_selectors": [],
     "suspicious_selectors": [],
     "oracle_addresses": [
-      "0x0000000000000000000000000000000000000002",
-      "0x0000000000000000000000000000000000000003"
+      "0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156",
+      "0xe34949A48cd2E6f5CD41753e449bd2d43993C9AC"
     ],
     "billing": {
       "tier": "guardian",
-      "billing_email": "finance@your-protocol.tld",
-      "alert_webhook": "https://example.com/ghost/billing-webhook",
+      "billing_email": "ghost-demo-finance@example.invalid",
       "active": true
     },
     "upgrade_monitor": {
       "proxy_addresses": [
-        "0x0000000000000000000000000000000000000001"
+        "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+        "0x5731a04B1E775f0fdd454Bf70f3335886e9A96be"
       ],
-      "timelock_addresses": [
-        "0x0000000000000000000000000000000000000004"
-      ],
+      "timelock_addresses": [],
       "timelock_lookback_blocks": 50000
-    },
-    "oracle_monitor": {
-      "require_sequencer_uptime_feed": true,
-      "minimum_sources": 2,
-      "max_cross_source_deviation_bps": 300,
-      "minimum_twap_window_secs": 1800,
-      "max_spot_vs_twap_deviation_bps": 500,
-      "feeds": [
-        {
-          "label": "eth_usd_chainlink",
-          "address": "0x0000000000000000000000000000000000000002",
-          "kind": "chainlink",
-          "pair": "ETH/USD",
-          "heartbeat_secs": 3600
-        },
-        {
-          "label": "base_sequencer",
-          "address": "0x0000000000000000000000000000000000000003",
-          "kind": "sequencer_uptime"
-        },
-        {
-          "label": "eth_usd_uniswap_twap",
-          "address": "0x0000000000000000000000000000000000000005",
-          "kind": "uniswap_v3_twap",
-          "pair": "ETH/USD",
-          "window_secs": 1800
-        }
-      ]
     },
     "dependencies": [
       {
-        "name": "bridge_adapter",
-        "address": "0x0000000000000000000000000000000000000006",
+        "name": "base_l2_standard_bridge",
+        "address": "0x4200000000000000000000000000000000000010",
         "kind": "bridge",
-        "critical": true,
-        "expected_codehash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "critical": false
       },
       {
-        "name": "uniswap_router",
-        "address": "0x0000000000000000000000000000000000000007",
-        "kind": "router",
+        "name": "aave_oracle_v3",
+        "address": "0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156",
+        "kind": "oracle",
         "critical": true
       },
       {
-        "name": "deposit_hook",
-        "address": "0x0000000000000000000000000000000000000008",
-        "kind": "external_hook",
+        "name": "aave_price_oracle_sentinel",
+        "address": "0xe34949A48cd2E6f5CD41753e449bd2d43993C9AC",
+        "kind": "oracle",
+        "critical": true
+      },
+      {
+        "name": "aerodrome_router",
+        "address": "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",
+        "kind": "router",
+        "critical": false
+      },
+      {
+        "name": "uniswap_v3_swap_router_02",
+        "address": "0x2626664c2603336E57B271c5C0b26F421741e481",
+        "kind": "router",
         "critical": false
       }
     ],
     "simulation": {
       "token_whales": [
         {
-          "token": "0x0000000000000000000000000000000000000009",
-          "holder": "0x0000000000000000000000000000000000000010"
+          "token": "0xd9aaec86B65d86f6A7B5B1B0c42FFA531710B6CA",
+          "holder": "0x0a1d576F3eFeF75b330424287a95A366e8281D54",
+          "decimals": 6
         }
       ],
       "routers": [
         {
-          "kind": "uniswap_v3",
-          "address": "0x0000000000000000000000000000000000000007",
-          "quoter": "0x0000000000000000000000000000000000000011"
-        },
-        {
           "kind": "aerodrome",
-          "address": "0x0000000000000000000000000000000000000013",
-          "factory": "0x0000000000000000000000000000000000000014"
+          "address": "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",
+          "factory": "0x420DD381b31aEf6683db6B902084cB0FFECe40Da",
+          "wrapped_native": "0x4200000000000000000000000000000000000006"
         },
         {
-          "kind": "balancer_v2",
-          "address": "0x0000000000000000000000000000000000000015",
-          "wrapped_native": "0x000000000000000000000000000000000000000a"
+          "kind": "uniswap_v3",
+          "address": "0x2626664c2603336E57B271c5C0b26F421741e481",
+          "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+          "wrapped_native": "0x4200000000000000000000000000000000000006"
         }
       ],
       "flash_loan_providers": [
         {
-          "kind": "balancer",
-          "address": "0x0000000000000000000000000000000000000012",
-          "asset": "0x0000000000000000000000000000000000000009",
-          "liquidity_holder": "0x0000000000000000000000000000000000000012"
+          "kind": "aave_v3",
+          "address": "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+          "asset": "0xd9aaec86B65d86f6A7B5B1B0c42FFA531710B6CA",
+          "liquidity_holder": "0x0a1d576F3eFeF75b330424287a95A366e8281D54"
         }
       ],
       "market_paths": [
         {
-          "label": "usdc-weth-direct",
-          "router_kind": "uniswap_v3",
-          "token_in": "0x0000000000000000000000000000000000000009",
-          "token_out": "0x000000000000000000000000000000000000000a",
-          "fee_tiers": [500],
-          "amount_in": "1000000000",
-          "slippage_bps": 100
-        },
-        {
-          "label": "usdc-weth-aerodrome-volatile",
+          "label": "usdbc-weth-aerodrome-volatile",
           "router_kind": "aerodrome",
-          "token_in": "0x0000000000000000000000000000000000000009",
-          "token_out": "0x000000000000000000000000000000000000000a",
-          "stable_hops": [false],
-          "amount_in": "1000000000",
+          "token_in": "0xd9aaec86B65d86f6A7B5B1B0c42FFA531710B6CA",
+          "token_out": "0x4200000000000000000000000000000000000006",
+          "stable_hops": [
+            false
+          ],
+          "amount_in": "100000000",
           "slippage_bps": 100
         },
         {
-          "label": "usdc-weth-balancer",
-          "router_kind": "balancer_v2",
-          "token_in": "0x0000000000000000000000000000000000000009",
-          "token_out": "0x000000000000000000000000000000000000000a",
-          "pool_ids": [
-            "0x1111111111111111111111111111111111111111111111111111111111111111"
+          "label": "usdbc-weth-uniswap-v3-005",
+          "router_kind": "uniswap_v3",
+          "token_in": "0xd9aaec86B65d86f6A7B5B1B0c42FFA531710B6CA",
+          "token_out": "0x4200000000000000000000000000000000000006",
+          "fee_tiers": [
+            500
           ],
-          "amount_in": "1000000000",
+          "amount_in": "100000000",
           "slippage_bps": 100
         }
       ]
     },
-    "invariants": [
-      {
-        "name": "solvency_floor",
-        "severity": "high",
-        "kind": "ratio_min",
-        "numerator": {
-          "address": "0x0000000000000000000000000000000000000001",
-          "function": "totalAssets"
-        },
-        "denominator": {
-          "address": "0x0000000000000000000000000000000000000001",
-          "function": "totalLiabilities"
-        },
-        "min_bps": 10000
-      },
-      {
-        "name": "share_price_drawdown",
-        "severity": "high",
-        "kind": "max_drawdown_bps",
-        "metric": {
-          "address": "0x0000000000000000000000000000000000000001",
-          "function": "pricePerShare"
-        },
-        "max_bps": 300
-      },
-      {
-        "name": "withdrawal_limit_band",
-        "severity": "medium",
-        "kind": "value_range",
-        "metric": {
-          "address": "0x0000000000000000000000000000000000000001",
-          "function": "withdrawalLimit"
-        },
-        "min": "1",
-        "max": "1000000000000000000000000"
-      }
-    ]
+    "invariants": []
   }
 ]

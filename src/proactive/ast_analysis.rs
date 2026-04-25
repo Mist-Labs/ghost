@@ -96,7 +96,7 @@ where
     }
 
     let abi = load_abi(protocol, None, implementation_address, http_client, config).await?;
-    let latest_block = simulation::latest_block_number(provider).await?;
+    let latest_block = simulation::latest_block_number(provider, config).await?;
 
     let mut findings = Vec::new();
     for rule_match in collect_rule_matches(&bundle, &compiled_asts)? {

@@ -121,15 +121,16 @@ pub async fn poll_and_scan(state: Arc<AppState>) -> Result<()> {
             "new hack report ingested"
         );
 
-        let Some(api_key) = state.config.openai_api_key.as_deref() else {
-            tracing::warn!("OPENAI_API_KEY is not configured; skipping signature extraction");
+        let Some(api_key) = state.config.kimi_api_key.as_deref() else {
+            tracing::warn!("KIMI_API_KEY is not configured; skipping signature extraction");
             continue;
         };
 
         let signature = extract_signature(
             &state.http_client,
             api_key,
-            &state.config.openai_model,
+            &state.config.kimi_model,
+            &state.config.kimi_base_url,
             stored_report.id,
             &report,
         )
@@ -141,7 +142,7 @@ pub async fn poll_and_scan(state: Arc<AppState>) -> Result<()> {
                 &mut conn,
                 &NewStoredSignature {
                     derived_from_report_id: stored_report.id,
-                    model: state.config.openai_model.clone(),
+                    model: state.config.kimi_model.clone(),
                     signature: signature.clone(),
                 },
             )
@@ -264,7 +265,8 @@ async fn validated_protocol_for_scan(
     protocol: &ProtocolDefinition,
 ) -> Result<ValidatedProtocolForScan> {
     let Some(validation) =
-        simulation::validate_protocol_simulation_profile(&state.provider, protocol).await?
+        simulation::validate_protocol_simulation_profile(&state.provider, &state.config, protocol)
+            .await?
     else {
         return Ok(ValidatedProtocolForScan {
             protocol: protocol.clone(),

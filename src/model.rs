@@ -447,3 +447,57 @@ pub struct StoredFilingSubmission {
     pub submitted_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::operator_accounts)]
+pub struct StoredOperatorAccount {
+    pub id: Uuid,
+    pub company_name: String,
+    pub contact_name: String,
+    pub email: String,
+    pub password_hash: String,
+    pub webauthn_user_id: String,
+    pub otp_enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_login_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::operator_sessions)]
+pub struct StoredOperatorSession {
+    pub id: Uuid,
+    pub operator_account_id: Uuid,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::operator_otp_codes)]
+pub struct StoredOperatorOtpCode {
+    pub id: Uuid,
+    pub operator_account_id: Uuid,
+    pub purpose: String,
+    pub code_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub consumed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::operator_passkeys)]
+pub struct StoredOperatorPasskey {
+    pub id: Uuid,
+    pub operator_account_id: Uuid,
+    pub credential_id: String,
+    pub public_key: String,
+    pub counter: i64,
+    pub transports: serde_json::Value,
+    pub device_type: String,
+    pub backed_up: bool,
+    pub label: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+}

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "uniswap-v3-base-sepolia-demo",
+    "name": "Uniswap V3 Base Sepolia (Local Demo Profile)",
+    "chain_id": 84532,
+    "protocol_type": "amm",
+    "monitoring_authorized": true,
+    "monitored_addresses": [
+      "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+      "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+      "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
+      "0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2",
+      "0x492E6456D9528771018DeB9E87ef7750EF184104"
+    ],
+    "contract_addresses": [
+      "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24",
+      "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+      "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
+      "0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2",
+      "0x492E6456D9528771018DeB9E87ef7750EF184104"
+    ],
+    "security_contacts": [
+      "ghost-demo-uniswap-sepolia@example.invalid"
+    ],
+    "known_selectors": [],
+    "sanctioned_selectors": [],
+    "suspicious_selectors": [],
+    "oracle_addresses": [],
+    "upgrade_monitor": {
+      "proxy_addresses": [
+        "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+        "0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2",
+        "0x492E6456D9528771018DeB9E87ef7750EF184104"
+      ],
+      "timelock_addresses": [],
+      "timelock_lookback_blocks": 50000
+    },
+    "dependencies": [
+      {
+        "name": "permit2",
+        "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "kind": "external_hook",
+        "critical": false
+      },
+      {
+        "name": "multicall",
+        "address": "0xd867e273eAbD6c853fCd0Ca0bFB6a3aE6491d2C1",
+        "kind": "other",
+        "critical": false
+      },
+      {
+        "name": "tick_lens",
+        "address": "0xedf6066a2b290C185783862C7F4776A2C8077AD1",
+        "kind": "other",
+        "critical": false
+      },
+      {
+        "name": "weth9",
+        "address": "0x4200000000000000000000000000000000000006",
+        "kind": "other",
+        "critical": false
+      },
+      {
+        "name": "base_sepolia_usdc",
+        "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "kind": "other",
+        "critical": false
+      }
+    ],
+    "invariants": []
+  }
+]

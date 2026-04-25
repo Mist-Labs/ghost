@@ -215,7 +215,7 @@ where
         return Ok((false, false, Some("attack_vector_not_simulatable".into())));
     }
 
-    let latest_block = simulation::latest_block_number(provider).await?;
+    let latest_block = simulation::latest_block_number(provider, config).await?;
     let mut market_probe_reason: Option<String> = None;
     if matches!(
         signature.attack_vector,
