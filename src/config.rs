@@ -36,6 +36,7 @@ pub struct Config {
     pub kimi_base_url: String,
     pub solc_binary: String,
     pub solc_bin_dir: Option<PathBuf>,
+    pub solc_auto_install: bool,
     pub anvil_binary: String,
     pub simulation_fork_block_number: Option<u64>,
     pub simulation_startup_timeout_secs: u64,
@@ -100,8 +101,11 @@ impl Config {
         let database_url = required("DATABASE_URL")?;
         let alchemy_http_url = required("ALCHEMY_HTTP_URL")?;
         let alchemy_ws_url = required("ALCHEMY_WS_URL")?;
-        let explorer_api_url =
-            env::var("EXPLORER_API_URL").unwrap_or_else(|_| default_explorer_api_url(chain_id));
+        let explorer_api_url = env::var("EXPLORER_API_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| normalize_explorer_api_url(&value, chain_id))
+            .unwrap_or_else(|| default_explorer_api_url(chain_id));
         let protocols_file = PathBuf::from(
             env::var("PROTOCOLS_FILE").unwrap_or_else(|_| "protocols.json".to_string()),
         );
@@ -196,6 +200,12 @@ impl Config {
             .ok()
             .filter(|value| !value.trim().is_empty())
             .map(PathBuf::from);
+        let solc_auto_install = env::var("SOLC_AUTO_INSTALL")
+            .ok()
+            .map(|value| parse_bool(&value))
+            .transpose()
+            .context("SOLC_AUTO_INSTALL must be a boolean")?
+            .unwrap_or(true);
         let anvil_binary = env::var("ANVIL_BINARY").unwrap_or_else(|_| "anvil".to_string());
         let simulation_fork_block_number = env::var("SIMULATION_FORK_BLOCK_NUMBER")
             .ok()
@@ -209,7 +219,8 @@ impl Config {
             .transpose()
             .context("SIMULATION_STARTUP_TIMEOUT_SECS must be a valid u64")?
             .unwrap_or(20);
-        let basescan_api_key = env::var("BASESCAN_API_KEY")
+        let basescan_api_key = env::var("ETHERSCAN_API_KEY")
+            .or_else(|_| env::var("BASESCAN_API_KEY"))
             .ok()
             .filter(|value| !value.trim().is_empty());
         let stripe_api_key = env::var("STRIPE_API_KEY")
@@ -281,6 +292,7 @@ impl Config {
             kimi_base_url,
             solc_binary,
             solc_bin_dir,
+            solc_auto_install,
             anvil_binary,
             simulation_fork_block_number,
             simulation_startup_timeout_secs,
@@ -423,14 +435,33 @@ fn bounty_from_env() -> Result<Option<BountyConfig>> {
         })?,
         solc_binary: solc_binary.unwrap_or_else(|| "solc".to_string()),
         contract_path: PathBuf::from(
-            contract_path.unwrap_or_else(|| "contracts/GhostBounty.sol".to_string()),
+            contract_path.unwrap_or_else(|| "contracts/src/GhostBounty.sol".to_string()),
         ),
     }))
 }
 
 fn default_explorer_api_url(chain_id: u64) -> String {
-    match chain_id {
-        84532 => "https://api-sepolia.basescan.org/api".to_string(),
-        _ => "https://api.basescan.org/api".to_string(),
+    format!("https://api.etherscan.io/v2/api?chainid={chain_id}")
+}
+
+fn normalize_explorer_api_url(value: &str, chain_id: u64) -> String {
+    let trimmed = value.trim();
+    if trimmed.contains("api.etherscan.io/v2/api") {
+        return trimmed.to_string();
+    }
+
+    match trimmed {
+        "https://api.basescan.org/api" | "https://api-sepolia.basescan.org/api" => {
+            default_explorer_api_url(chain_id)
+        }
+        _ => trimmed.to_string(),
+    }
+}
+
+fn parse_bool(value: &str) -> Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(anyhow!("invalid boolean value {value}")),
     }
 }

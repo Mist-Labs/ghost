@@ -63,12 +63,15 @@ where
     }
 
     let mut signals: Vec<String> = Vec::new();
+    let mut score: u8 = 0;
 
     if FLASH_LOAN_SELECTORS.contains(&selector.as_str()) {
         signals.push("flash_loan".into());
+        score = score.saturating_add(2);
     }
     if is_multicall(tx) && call_count(tx) >= 3 {
         signals.push("multicall_3plus".into());
+        score = score.saturating_add(1);
     }
     if !protocol
         .known_selectors
@@ -76,6 +79,7 @@ where
         .any(|known| known == &selector)
     {
         signals.push("unknown_selector".into());
+        score = score.saturating_add(1);
     }
     if protocol
         .suspicious_selectors
@@ -83,6 +87,9 @@ where
         .any(|known| known == &selector)
     {
         signals.push("protocol_marked_suspicious".into());
+        // Dangerous selectors on explicitly monitored contracts should alert even if
+        // the attacker wallet is older and does not trip freshness heuristics.
+        score = score.saturating_add(3);
     }
     let tx_count = provider
         .get_transaction_count(tx.from, None)
@@ -90,9 +97,11 @@ where
         .as_u64();
     if tx_count < 10 {
         signals.push("fresh_wallet".into());
+        score = score.saturating_add(1);
     }
     if wallet_funded_within_hours(tx.from, 48, provider).await? {
         signals.push("recently_funded".into());
+        score = score.saturating_add(1);
     }
     let base_fee = provider
         .get_block(ethers::types::BlockNumber::Latest)
@@ -102,10 +111,10 @@ where
     if let Some(gas_price) = tx.gas_price {
         if gas_price > base_fee * 3u64 {
             signals.push("high_gas".into());
+            score = score.saturating_add(1);
         }
     }
 
-    let score = signals.len() as u8;
     Ok(ScoreResult {
         score,
         signals,

@@ -84,7 +84,14 @@ pub async fn load_abi(
 
     if let Some(api_key) = &config.basescan_api_key {
         if let Some(abi) =
-            fetch_basescan_abi(http_client, address, api_key, &config.explorer_api_url).await?
+            fetch_basescan_abi(
+                http_client,
+                address,
+                api_key,
+                &config.explorer_api_url,
+                config.chain_id,
+            )
+            .await?
         {
             return Ok(Some(abi));
         }
@@ -107,8 +114,14 @@ pub async fn load_verified_source_bundle(
 
     if let Some(api_key) = &config.basescan_api_key {
         if let Some(bundle) =
-            fetch_basescan_source_bundle(http_client, address, api_key, &config.explorer_api_url)
-                .await?
+            fetch_basescan_source_bundle(
+                http_client,
+                address,
+                api_key,
+                &config.explorer_api_url,
+                config.chain_id,
+            )
+            .await?
         {
             return Ok(Some(bundle));
         }
@@ -465,6 +478,7 @@ async fn fetch_basescan_abi(
     address: Address,
     api_key: &str,
     api_url: &str,
+    chain_id: u64,
 ) -> Result<Option<Abi>> {
     #[derive(serde::Deserialize)]
     struct BasescanResponse {
@@ -473,12 +487,13 @@ async fn fetch_basescan_abi(
     }
 
     let response = client
-        .get(api_url)
+        .get(explorer_v2_api_url(api_url))
         .query(&[
-            ("module", "contract"),
-            ("action", "getabi"),
-            ("address", &format!("{address:?}")),
-            ("apikey", api_key),
+            ("chainid", chain_id.to_string()),
+            ("module", "contract".to_string()),
+            ("action", "getabi".to_string()),
+            ("address", format!("{address:?}")),
+            ("apikey", api_key.to_string()),
         ])
         .send()
         .await?
@@ -498,6 +513,7 @@ async fn fetch_basescan_source_bundle(
     address: Address,
     api_key: &str,
     api_url: &str,
+    chain_id: u64,
 ) -> Result<Option<VerifiedSourceBundle>> {
     #[derive(serde::Deserialize)]
     struct BasescanSourceRow {
@@ -520,12 +536,13 @@ async fn fetch_basescan_source_bundle(
     }
 
     let response = client
-        .get(api_url)
+        .get(explorer_v2_api_url(api_url))
         .query(&[
-            ("module", "contract"),
-            ("action", "getsourcecode"),
-            ("address", &format!("{address:?}")),
-            ("apikey", api_key),
+            ("chainid", chain_id.to_string()),
+            ("module", "contract".to_string()),
+            ("action", "getsourcecode".to_string()),
+            ("address", format!("{address:?}")),
+            ("apikey", api_key.to_string()),
         ])
         .send()
         .await?
@@ -562,6 +579,10 @@ async fn fetch_basescan_source_bundle(
         optimizer_enabled,
         optimizer_runs,
     }))
+}
+
+fn explorer_v2_api_url(api_url: &str) -> &str {
+    api_url.split('?').next().unwrap_or(api_url)
 }
 
 fn normalize_basescan_source(

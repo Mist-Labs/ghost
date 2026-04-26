@@ -1,7 +1,24 @@
-import { ZgFile, Indexer } from "@0gfoundation/0g-ts-sdk";
-import { ethers } from "ethers";
+import path from "path";
+import { createRequire } from "module";
+import { fileURLToPath, pathToFileURL } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const workspaceRoot = path.resolve(__dirname, "..");
+const frontendRoot = path.join(workspaceRoot, "frontend");
+const requireFromFrontend = createRequire(path.join(frontendRoot, "package.json"));
+
+async function loadFrontendDependency(packageName) {
+  const resolved = requireFromFrontend.resolve(packageName);
+  return import(pathToFileURL(resolved).href);
+}
 
 async function main() {
+  const [{ ZgFile, Indexer }, { ethers }] = await Promise.all([
+    loadFrontendDependency("@0gfoundation/0g-ts-sdk"),
+    loadFrontendDependency("ethers"),
+  ]);
+
   const filePath = process.argv[2];
   const contentType = process.argv[3] || "application/octet-stream";
   const rpcUrl = process.env.ZG_RPC_URL;

@@ -1,0 +1,121 @@
+{
+  "incident": {
+    "attacker_address": "0x2af423ba8cd60fe7ca0bbcc4cf1f4e6a7e576039",
+    "chain_name": "base",
+    "confidence": "medium",
+    "corpus_provenance": {
+      "bridge": {
+        "checksum_sha256": "b723bcefa633a464f2d025fed2423eff33e055b84a767bbd8f502c0d133a70b4",
+        "loaded_at": "2026-04-26T06:48:55.993066Z",
+        "path": "bridge_addresses.example.json",
+        "source_entries": 5,
+        "unique_entries": 3
+      },
+      "cex": {
+        "checksum_sha256": "8dbdf57d47653c3690a8f9eb60d3fd6d8444b3d719709da44ed16a71c027ed84",
+        "loaded_at": "2026-04-26T06:48:55.992062Z",
+        "path": "cex_wallets.example.json",
+        "source_entries": 2,
+        "unique_entries": 2
+      },
+      "mixer": {
+        "checksum_sha256": "df183b8d7026f1940cf87508e4919f68586f9b08be0025a59ae7f818f7c5388e",
+        "loaded_at": "2026-04-26T06:48:55.993615Z",
+        "path": "mixer_pools.example.json",
+        "source_entries": 6,
+        "unique_entries": 5
+      }
+    },
+    "detected_at": "2026-04-26T06:49:51.379038Z",
+    "first_seen_at": "2026-04-26T06:49:51.379038Z",
+    "id": "db43b224-2156-47d8-9808-425816c2a5b2",
+    "last_updated_at": "2026-04-26T06:49:51.379038Z",
+    "protocol_address": "0xf7aa8e296fb481d1231c705db2024712a08ce821",
+    "protocol_id": "ghost-sepolia-demo",
+    "protocol_name": "Ghost Sepolia Demo",
+    "raw_transaction": {
+      "accessList": [],
+      "blockHash": null,
+      "blockNumber": null,
+      "chainId": "0x14a34",
+      "from": "0x2af423ba8cd60fe7ca0bbcc4cf1f4e6a7e576039",
+      "gas": "0x7a19",
+      "gasPrice": "0xa7d8c0",
+      "hash": "0xa1747a793ddaa2177e805a5ed29c9faf5ea6f44babdc36bd63285db87c52fd30",
+      "input": "0x309411c40000000000000000000000002af423ba8cd60fe7ca0bbcc4cf1f4e6a7e576039",
+      "maxFeePerGas": "0xa7d8c0",
+      "maxPriorityFeePerGas": "0xf4240",
+      "nonce": "0x9",
+      "r": "0x40d251916b867a7527d68dd924370233abecaee13530aae88a46cfb73965d7b2",
+      "s": "0x6b83cf03a8dbcb778b45898a1cb31f2ced43720728d298b4416cf7c238dc191a",
+      "to": "0xf7aa8e296fb481d1231c705db2024712a08ce821",
+      "transactionIndex": null,
+      "type": "0x2",
+      "v": "0x0",
+      "value": "0x0",
+      "yParity": "0x0"
+    },
+    "score": 2,
+    "signals": {
+      "drain": {
+        "absolute_loss": 0,
+        "confirmed": false,
+        "pct_drained": 0.0,
+        "reason": "transaction not yet mined"
+      },
+      "economic": {
+        "checked": false,
+        "invariant_violated": false,
+        "overshoot_pct": 0.0
+      },
+      "intent": "SuspiciousCall",
+      "signals": [
+        "unknown_selector",
+        "fresh_wallet"
+      ]
+    },
+    "status": "triaged",
+    "summary": "Ghost Sepolia Demo candidate exploit on 0xa1747a793ddaa2177e805a5ed29c9faf5ea6f44babdc36bd63285db87c52fd30 with 2 signal(s)",
+    "tx_hash": "0xa1747a793ddaa2177e805a5ed29c9faf5ea6f44babdc36bd63285db87c52fd30"
+  },
+  "signals": {
+    "drain": {
+      "absolute_loss": 0,
+      "confirmed": false,
+      "pct_drained": 0.0,
+      "reason": "transaction not yet mined"
+    },
+    "economic": {
+      "checked": false,
+      "invariant_violated": false,
+      "overshoot_pct": 0.0
+    },
+    "intent": "SuspiciousCall",
+    "signals": [
+      "unknown_selector",
+      "fresh_wallet"
+    ]
+  },
+  "transaction": {
+    "accessList": [],
+    "blockHash": null,
+    "blockNumber": null,
+    "chainId": "0x14a34",
+    "from": "0x2af423ba8cd60fe7ca0bbcc4cf1f4e6a7e576039",
+    "gas": "0x7a19",
+    "gasPrice": "0xa7d8c0",
+    "hash": "0xa1747a793ddaa2177e805a5ed29c9faf5ea6f44babdc36bd63285db87c52fd30",
+    "input": "0x309411c40000000000000000000000002af423ba8cd60fe7ca0bbcc4cf1f4e6a7e576039",
+    "maxFeePerGas": "0xa7d8c0",
+    "maxPriorityFeePerGas": "0xf4240",
+    "nonce": "0x9",
+    "r": "0x40d251916b867a7527d68dd924370233abecaee13530aae88a46cfb73965d7b2",
+    "s": "0x6b83cf03a8dbcb778b45898a1cb31f2ced43720728d298b4416cf7c238dc191a",
+    "to": "0xf7aa8e296fb481d1231c705db2024712a08ce821",
+    "transactionIndex": null,
+    "type": "0x2",
+    "v": "0x0",
+    "value": "0x0",
+    "yParity": "0x0"
+  }
+}

@@ -68,5 +68,79 @@
       }
     ],
     "invariants": []
+  },
+  {
+    "id": "ghost-sepolia-demo",
+    "name": "Ghost Sepolia Demo",
+    "chain_id": 84532,
+    "protocol_type": "vault",
+    "monitoring_authorized": true,
+    "monitored_addresses": [
+      "0xf7Aa8E296fB481d1231c705DB2024712A08ce821"
+    ],
+    "contract_addresses": [
+      "0xf7Aa8E296fB481d1231c705DB2024712A08ce821"
+    ],
+    "security_contacts": [
+      "ghost-demo@example.invalid"
+    ],
+    "known_selectors": [
+      "485cc955",
+      "83f94db7",
+      "7adbf973",
+      "2defd3b8",
+      "f9253a8b",
+      "309411c4",
+      "3e958959"
+    ],
+    "sanctioned_selectors": [],
+    "suspicious_selectors": [
+      "485cc955",
+      "83f94db7",
+      "7adbf973",
+      "2defd3b8",
+      "f9253a8b",
+      "309411c4"
+    ],
+    "oracle_addresses": [
+      "0xf7Aa8E296fB481d1231c705DB2024712A08ce821"
+    ],
+    "upgrade_monitor": {
+      "proxy_addresses": [
+        "0xf7Aa8E296fB481d1231c705DB2024712A08ce821"
+      ],
+      "timelock_addresses": [],
+      "timelock_lookback_blocks": 50000
+    },
+    "dependencies": [],
+    "invariants": [
+      {
+        "name": "vault_balance_nonzero",
+        "severity": "high",
+        "kind": "value_range",
+        "metric": {
+          "address": "0xf7Aa8E296fB481d1231c705DB2024712A08ce821",
+          "function": "lastSpotPrice",
+          "arguments": [],
+          "abi": [
+            {
+              "inputs": [],
+              "name": "lastSpotPrice",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ],
+              "stateMutability": "view",
+              "type": "function"
+            }
+          ],
+          "output_index": 0
+        },
+        "min": "0"
+      }
+    ]
   }
 ]

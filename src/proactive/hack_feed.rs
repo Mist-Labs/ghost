@@ -1,17 +1,16 @@
 use super::{AttackVector, HackReport};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use rss::Channel;
-use serde::Deserialize;
 use std::collections::HashSet;
 
 pub async fn poll_hack_feeds(client: &Client) -> Result<Vec<HackReport>> {
-    let (rekt, defillama) = tokio::join!(poll_rekt_news(client), poll_defillama_hacks(client));
-
     let mut reports = Vec::new();
-    reports.extend(rekt?);
-    reports.extend(defillama?);
+    match poll_rekt_news(client).await {
+        Ok(items) => reports.extend(items),
+        Err(error) => tracing::warn!(error = %error, "Rekt News feed polling failed"),
+    }
 
     let mut seen = HashSet::new();
     reports.retain(|report| seen.insert(format!("{}:{}", report.source, report.external_id)));
@@ -21,14 +20,23 @@ pub async fn poll_hack_feeds(client: &Client) -> Result<Vec<HackReport>> {
 }
 
 async fn poll_rekt_news(client: &Client) -> Result<Vec<HackReport>> {
-    let feed = client
-        .get("https://rekt.news/rss")
+    let response = client
+        .get("https://newsletter.rekt.news/rss")
         .send()
-        .await?
-        .error_for_status()?
-        .bytes()
         .await?;
-    let channel = Channel::read_from(&feed[..]).context("failed to parse Rekt RSS feed")?;
+    if !response.status().is_success() {
+        tracing::debug!(status = %response.status(), "Rekt News feed unavailable; skipping poll");
+        return Ok(Vec::new());
+    }
+
+    let feed = response.bytes().await?;
+    let channel = match Channel::read_from(&feed[..]) {
+        Ok(channel) => channel,
+        Err(error) => {
+            tracing::debug!(error = %error, "Rekt News feed response was not RSS; skipping poll");
+            return Ok(Vec::new());
+        }
+    };
     let mut reports = Vec::new();
 
     for item in channel.items() {
@@ -73,52 +81,6 @@ async fn poll_rekt_news(client: &Client) -> Result<Vec<HackReport>> {
     Ok(reports)
 }
 
-async fn poll_defillama_hacks(client: &Client) -> Result<Vec<HackReport>> {
-    let response = client
-        .get("https://api.llama.fi/hacks")
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<DefiLlamaResponse>()
-        .await?;
-
-    let hacks = match response {
-        DefiLlamaResponse::Wrapped { hacks } => hacks,
-        DefiLlamaResponse::List(hacks) => hacks,
-    };
-
-    let reports = hacks
-        .into_iter()
-        .map(|hack| {
-            let title = format!("{} exploit", hack.name);
-            let description = hack.description.clone().unwrap_or_default();
-            let classification = hack.classification.clone().unwrap_or_default();
-            let attack_vector = if classification.is_empty() {
-                AttackVector::classify(&description)
-            } else {
-                AttackVector::classify(&classification)
-            };
-
-            HackReport {
-                source: "defillama".into(),
-                external_id: hack.id.clone(),
-                protocol: hack.name.clone(),
-                published_at: DateTime::from_timestamp(hack.date, 0).unwrap_or_else(Utc::now),
-                loss_usd: Some(hack.amount),
-                attack_vector,
-                root_cause: classification.clone(),
-                chain_name: hack.chain.to_ascii_lowercase(),
-                title,
-                summary: description.clone(),
-                source_url: format!("https://defillama.com/hacks/{}", hack.id),
-                raw_payload: serde_json::to_value(&hack).unwrap_or_else(|_| serde_json::json!({})),
-            }
-        })
-        .collect();
-
-    Ok(reports)
-}
-
 fn parse_rss_date(input: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc2822(input)
         .map(|value| value.with_timezone(&Utc))
@@ -138,22 +100,4 @@ fn infer_chain_name(text: &str) -> String {
     } else {
         "unknown".into()
     }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum DefiLlamaResponse {
-    Wrapped { hacks: Vec<DefiLlamaHack> },
-    List(Vec<DefiLlamaHack>),
-}
-
-#[derive(Debug, Deserialize, serde::Serialize)]
-struct DefiLlamaHack {
-    id: String,
-    name: String,
-    date: i64,
-    amount: f64,
-    chain: String,
-    classification: Option<String>,
-    description: Option<String>,
 }

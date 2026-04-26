@@ -6,7 +6,12 @@
     "dev": "node ./scripts/run-next.mjs dev",
     "build": "node ./scripts/run-next.mjs build",
     "start": "node ./scripts/run-next.mjs start",
-    "lint": "node ./scripts/run-next.mjs lint"
+    "lint": "node ./scripts/run-next.mjs lint",
+    "forge": "node ./scripts/run-foundry.mjs",
+    "demo:contract": "node ./scripts/run-foundry.mjs script script/GhostSepoliaDemo.s.sol:DeployGhostSepoliaDemo",
+    "demo:contract:deploy": "node ./scripts/run-foundry.mjs script script/GhostSepoliaDemo.s.sol:DeployGhostSepoliaDemo --broadcast",
+    "demo:contract:deploy:verify": "node ./scripts/run-foundry.mjs script script/GhostSepoliaDemo.s.sol:DeployGhostSepoliaDemo --broadcast --verify --verifier etherscan",
+    "demo:contract:verify": "node ./scripts/run-foundry.mjs verify-contract"
   },
   "dependencies": {
     "@0gfoundation/0g-ts-sdk": "^1.2.6",

@@ -1,5 +1,6 @@
 use crate::db::{
-    insert_artifact, list_incident_artifacts, list_verification_jobs_for_incident, upsert_incident,
+    find_incident_by_tx_hash, insert_artifact, list_incident_artifacts,
+    list_verification_jobs_for_incident, upsert_incident,
 };
 use crate::detection::*;
 use crate::intelligence::fingerprint::build_fingerprint;
@@ -15,15 +16,35 @@ use crate::tracking::fund_tracker::{IncidentCorpusSnapshot, TrackingContext};
 use crate::verification::mugen::submit_verification;
 use anyhow::Result;
 use chrono::Utc;
-use ethers::types::Transaction;
+use ethers::providers::Middleware;
+use ethers::types::{H256, Transaction};
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
+
+const POST_SETTLEMENT_POLL_ATTEMPTS: usize = 24;
+const POST_SETTLEMENT_POLL_INTERVAL_SECS: u64 = 5;
 
 pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) -> Result<()> {
-    let score_result = score_transaction(&tx, &state.provider, &state.protocols).await?;
-    if score_result.protocol.is_none() || score_result.is_sanctioned_exit {
-        return Ok(());
+    if state.protocols.match_transaction(&tx).is_some() && tx.block_number.is_none() {
+        let follow_up_state = state.clone();
+        let tx_hash = tx.hash;
+        tokio::spawn(async move {
+            if let Err(error) = follow_up_mined_transaction(tx_hash, follow_up_state).await {
+                tracing::warn!(error = %error, tx_hash = ?tx_hash, "post-settlement protocol check failed");
+            }
+        });
     }
-    if score_result.score < state.config.min_alert_score {
+
+    process_transaction(tx, state, false).await
+}
+
+async fn process_transaction(
+    tx: Transaction,
+    state: Arc<AppState>,
+    post_settlement: bool,
+) -> Result<()> {
+    let mut score_result = score_transaction(&tx, &state.provider, &state.protocols).await?;
+    if score_result.protocol.is_none() || score_result.is_sanctioned_exit {
         return Ok(());
     }
 
@@ -64,9 +85,38 @@ pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) ->
         invariant_violated: false,
         overshoot_pct: 0.0,
     });
+
+    if post_settlement {
+        if drain.confirmed
+            && !score_result
+                .signals
+                .iter()
+                .any(|signal| signal == "post_tx_balance_drain")
+        {
+            score_result.signals.push("post_tx_balance_drain".into());
+            score_result.score = score_result.score.saturating_add(3).max(4);
+        }
+        if economic.invariant_violated
+            && !score_result
+                .signals
+                .iter()
+                .any(|signal| signal == "post_tx_invariant_violation")
+        {
+            score_result
+                .signals
+                .push("post_tx_invariant_violation".into());
+            score_result.score = score_result.score.saturating_add(2).max(4);
+        }
+    }
+
+    let strong_post_settlement_signal = post_settlement && (drain.confirmed || economic.invariant_violated);
+    if score_result.score < state.config.min_alert_score && !strong_post_settlement_signal {
+        return Ok(());
+    }
+
     let tier = resolve_confidence_tier(score_result.score, &drain, &intent, &economic);
 
-    if matches!(tier, ConfidenceTier::None | ConfidenceTier::Low) {
+    if matches!(tier, ConfidenceTier::None | ConfidenceTier::Low) && !strong_post_settlement_signal {
         return Ok(());
     }
 
@@ -93,8 +143,9 @@ pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) ->
     let corpus_provenance = serde_json::to_value(corpus_snapshot.provenance())?;
 
     let protocol = score_result.protocol.clone().unwrap();
+    let tx_hash_hex = format!("{:?}", tx.hash);
     let new_incident = NewIncident {
-        tx_hash: format!("{:?}", tx.hash),
+        tx_hash: tx_hash_hex.clone(),
         chain_name: state.config.chain_name.clone(),
         status: "triaged".to_string(),
         confidence: format!("{tier:?}").to_ascii_lowercase(),
@@ -112,11 +163,23 @@ pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) ->
         summary: Some(format!(
             "{} candidate exploit on {} with {} signal(s)",
             protocol.name,
-            format!("{:?}", tx.hash),
+            tx_hash_hex,
             score_result.score
         )),
     };
 
+    let existing_incident = {
+        let mut conn = state.pool.get().await?;
+        find_incident_by_tx_hash(&mut conn, &new_incident.tx_hash).await?
+    };
+    let should_notify = existing_incident
+        .as_ref()
+        .map(|incident| {
+            incident.score < new_incident.score
+                || incident.confidence != new_incident.confidence
+                || incident.status != new_incident.status
+        })
+        .unwrap_or(true);
     let incident = {
         let mut conn = state.pool.get().await?;
         upsert_incident(&mut conn, &new_incident).await?
@@ -166,39 +229,60 @@ pub async fn on_suspicious_transaction(tx: Transaction, state: Arc<AppState>) ->
         );
     }
 
-    state
-        .fund_tracker
-        .start_tracking(
-            tx.from,
-            state.ws_provider.clone(),
-            corpus_snapshot,
-            TrackingContext {
-                incident_id: incident.id,
-                exploit_tx_hash: format!("{:?}", tx.hash),
-                protocol_id: Some(protocol.id.clone()),
-                started_at: detected_at,
-            },
-        )
-        .await?;
+    if existing_incident.is_none() {
+        state
+            .fund_tracker
+            .start_tracking(
+                tx.from,
+                state.ws_provider.clone(),
+                corpus_snapshot,
+                TrackingContext {
+                    incident_id: incident.id,
+                    exploit_tx_hash: format!("{:?}", tx.hash),
+                    protocol_id: Some(protocol.id.clone()),
+                    started_at: detected_at,
+                },
+            )
+            .await?;
+    }
 
-    state.notifications.notify_incident(&incident).await?;
-    dispatch_keeperhub(&state, &incident, &artifact).await?;
+    if should_notify {
+        state.notifications.notify_incident(&incident).await?;
+        dispatch_keeperhub(&state, &incident, &artifact).await?;
+    }
 
-    let intelligence_state = state.clone();
-    let intelligence_incident = incident.clone();
-    let tx_hash_hex = format!("{:?}", tx.hash);
-    tokio::spawn(async move {
-        if let Err(error) = build_intelligence_artifacts(
-            intelligence_state,
-            intelligence_incident,
-            tx.from,
-            tx_hash_hex,
-        )
-        .await
-        {
-            tracing::warn!(error = %error, "incident intelligence artifact generation failed");
+    if existing_incident.is_none() {
+        let intelligence_state = state.clone();
+        let intelligence_incident = incident.clone();
+        let tx_hash_hex = format!("{:?}", tx.hash);
+        tokio::spawn(async move {
+            if let Err(error) = build_intelligence_artifacts(
+                intelligence_state,
+                intelligence_incident,
+                tx.from,
+                tx_hash_hex,
+            )
+            .await
+            {
+                tracing::warn!(error = %error, "incident intelligence artifact generation failed");
+            }
+        });
+    }
+
+    Ok(())
+}
+
+async fn follow_up_mined_transaction(tx_hash: H256, state: Arc<AppState>) -> Result<()> {
+    for _ in 0..POST_SETTLEMENT_POLL_ATTEMPTS {
+        if let Some(tx) = state.provider.get_transaction(tx_hash).await? {
+            if tx.block_number.is_some() {
+                process_transaction(tx, state, true).await?;
+                return Ok(());
+            }
         }
-    });
+
+        sleep(Duration::from_secs(POST_SETTLEMENT_POLL_INTERVAL_SECS)).await;
+    }
 
     Ok(())
 }

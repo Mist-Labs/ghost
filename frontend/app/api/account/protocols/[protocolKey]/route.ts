@@ -5,6 +5,10 @@ import {
   validateOperatorProtocolInput,
   type OperatorProtocolInput,
 } from "@/lib/server/operator-protocols";
+import {
+  deleteProtocolFromRegistry,
+  upsertProtocolInRegistry,
+} from "@/lib/server/protocol-registry-sync";
 import { ensureTrustedOrigin } from "@/lib/server/request-security";
 
 type RouteContext = {
@@ -37,6 +41,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       return Response.json({ error: "Protocol not found." }, { status: 404 });
     }
 
+    await upsertProtocolInRegistry(protocol);
     return Response.json({ ok: true, protocol });
   } catch (error) {
     if ((error as { code?: string })?.code === "23505") {
@@ -70,6 +75,7 @@ export async function DELETE(request: Request, context: RouteContext) {
       return Response.json({ error: "Protocol not found." }, { status: 404 });
     }
 
+    await deleteProtocolFromRegistry(context.params.protocolKey);
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(

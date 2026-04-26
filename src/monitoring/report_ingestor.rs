@@ -3,7 +3,7 @@ use crate::model::NewHackIntelReport;
 use crate::proactive::AttackVector;
 use anyhow::Result;
 use diesel_async::AsyncPgConnection;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -18,21 +18,31 @@ struct HackReport {
 }
 
 #[derive(Deserialize)]
-struct HacksResponse {
-    hacks: Vec<HackReport>,
+#[serde(untagged)]
+enum HacksResponse {
+    Wrapped { hacks: Vec<HackReport> },
+    List(Vec<HackReport>),
 }
 
 pub async fn ingest_defillama_hacks(conn: &mut AsyncPgConnection) -> Result<()> {
     let client = Client::new();
-    let resp: HacksResponse = client
-        .get("https://api.llama.fi/api/hacks")
+    let response = client
+        .get("https://api.llama.fi/hacks")
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
+    if response.status() == StatusCode::PAYMENT_REQUIRED {
+        tracing::debug!("DefiLlama hacks endpoint requires payment; skipping ingestion");
+        return Ok(());
+    }
 
-    for hack in resp.hacks {
+    let resp: HacksResponse = response.error_for_status()?.json().await?;
+
+    let hacks = match resp {
+        HacksResponse::Wrapped { hacks } => hacks,
+        HacksResponse::List(hacks) => hacks,
+    };
+
+    for hack in hacks {
         let raw_payload = serde_json::to_value(&hack)?;
         let published_at = chrono::DateTime::from_timestamp(hack.date, 0)
             .ok_or_else(|| anyhow::anyhow!("invalid hack timestamp for {}", hack.id))?;

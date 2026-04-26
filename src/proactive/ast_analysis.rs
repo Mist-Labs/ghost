@@ -15,6 +15,8 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[derive(Debug, Clone)]
 struct AstRuleMatch {
@@ -784,16 +786,13 @@ async fn resolve_solc_path(version: &str, config: &Config) -> Result<PathBuf> {
         .next()
         .unwrap_or(normalized.as_str())
         .to_string();
+    let cache_dir = config
+        .solc_bin_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(".solc-bin"));
 
     if let Some(dir) = &config.solc_bin_dir {
-        for candidate in [
-            dir.join(format!("solc-{normalized}")),
-            dir.join(format!("solc-v{normalized}")),
-            dir.join(format!("solc-{short}")),
-            dir.join(format!("solc-v{short}")),
-            dir.join(&normalized).join("solc"),
-            dir.join(&short).join("solc"),
-        ] {
+        for candidate in solc_path_candidates(dir, &normalized, &short) {
             if candidate.exists() {
                 verify_solc_version(&candidate, &normalized).await?;
                 return Ok(candidate);
@@ -802,8 +801,90 @@ async fn resolve_solc_path(version: &str, config: &Config) -> Result<PathBuf> {
     }
 
     let configured = PathBuf::from(&config.solc_binary);
-    verify_solc_version(&configured, &normalized).await?;
-    Ok(configured)
+    match verify_solc_version(&configured, &normalized).await {
+        Ok(()) => return Ok(configured),
+        Err(error) if !config.solc_auto_install => return Err(error),
+        Err(error) => {
+            tracing::debug!(
+                error = %error,
+                required_version = %normalized,
+                "configured solc did not match verified source compiler"
+            );
+        }
+    }
+
+    if config.solc_auto_install {
+        let installed = install_solc_version(&normalized, &short, &cache_dir).await?;
+        verify_solc_version(&installed, &normalized).await?;
+        return Ok(installed);
+    }
+
+    Err(anyhow!("no solc binary found for required compiler version {normalized}"))
+}
+
+fn solc_path_candidates(dir: &Path, normalized: &str, short: &str) -> Vec<PathBuf> {
+    vec![
+        dir.join(format!("solc-{normalized}")),
+        dir.join(format!("solc-v{normalized}")),
+        dir.join(format!("solc-{short}")),
+        dir.join(format!("solc-v{short}")),
+        dir.join(normalized).join("solc"),
+        dir.join(short).join("solc"),
+    ]
+}
+
+async fn install_solc_version(normalized: &str, short: &str, dir: &Path) -> Result<PathBuf> {
+    let target = dir.join(format!("solc-{normalized}"));
+    if target.exists() {
+        return Ok(target);
+    }
+
+    tokio::fs::create_dir_all(dir).await?;
+    let platform = solc_binary_platform()?;
+    let list_url = format!("https://binaries.soliditylang.org/{platform}/list.json");
+    let list: Value = reqwest::get(&list_url)
+        .await
+        .with_context(|| format!("failed to fetch {list_url}"))?
+        .error_for_status()?
+        .json()
+        .await?;
+    let build_path = list
+        .get("releases")
+        .and_then(|value| value.get(short))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("solc {short} is not listed for {platform}"))?;
+    let download_url = format!("https://binaries.soliditylang.org/{platform}/{build_path}");
+    let bytes = reqwest::get(&download_url)
+        .await
+        .with_context(|| format!("failed to download {download_url}"))?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    let tmp = target.with_extension("tmp");
+    tokio::fs::write(&tmp, &bytes).await?;
+
+    #[cfg(unix)]
+    {
+        let permissions = std::fs::Permissions::from_mode(0o755);
+        tokio::fs::set_permissions(&tmp, permissions).await?;
+    }
+
+    tokio::fs::rename(&tmp, &target).await?;
+    tracing::info!(
+        compiler_version = %normalized,
+        path = %target.display(),
+        "installed solc compiler for verified-source AST analysis"
+    );
+    Ok(target)
+}
+
+fn solc_binary_platform() -> Result<&'static str> {
+    match std::env::consts::OS {
+        "macos" => Ok("macosx-amd64"),
+        "linux" => Ok("linux-amd64"),
+        "windows" => Ok("windows-amd64"),
+        other => Err(anyhow!("automatic solc install is unsupported on {other}")),
+    }
 }
 
 async fn verify_solc_version(path: &Path, version: &str) -> Result<()> {

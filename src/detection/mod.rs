@@ -30,6 +30,10 @@ pub fn resolve_confidence_tier(
         ConfidenceTier::Critical
     } else if economic.invariant_violated {
         ConfidenceTier::High
+    } else if drain.confirmed && score >= 3 {
+        ConfidenceTier::High
+    } else if drain.confirmed {
+        ConfidenceTier::Medium
     } else if matches!(intent, ABIIntent::SuspiciousCall) && score >= 3 {
         ConfidenceTier::High
     } else if drain.confirmed && matches!(intent, ABIIntent::SuspiciousCall) && score >= 2 {

@@ -52,10 +52,10 @@ contract GhostBounty {
 
         claimed = true;
 
-        (bool returnedFunds, ) = payable(recoveryRecipient).call{value: msg.value}("");
+        (bool returnedFunds,) = payable(recoveryRecipient).call{value: msg.value}("");
         require(returnedFunds, "Return transfer failed");
 
-        (bool paidBounty, ) = payable(attacker).call{value: bounty}("");
+        (bool paidBounty,) = payable(attacker).call{value: bounty}("");
         require(paidBounty, "Bounty payout failed");
 
         emit BountyClaimed(attacker, msg.value, bounty);

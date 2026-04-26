@@ -67,10 +67,10 @@ export default async function HomePage() {
 
             <div className="mt-10 flex flex-wrap justify-center gap-4">
               <Link
-                href={signedIn ? "/account" : "/sign-up"}
+                href={signedIn ? "/account" : "/sign-in"}
                 className="rounded-full bg-signal px-6 py-3 font-display text-sm font-semibold uppercase tracking-[0.12em] text-black shadow-signal transition hover:brightness-110"
               >
-                {signedIn ? "Run Analysis" : "Sign up"}
+                {signedIn ? "Run Analysis" : "Sign in"}
               </Link>
               <Link
                 href="/how-it-works"

@@ -1,5 +1,5 @@
 use crate::config::ZeroGConfig;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -115,14 +115,38 @@ impl ZeroGArtifactStore {
             })?;
 
         if !output.status.success() {
-            return Err(anyhow!(
-                "0G artifact publisher failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
+            tracing::warn!(
+                error = %String::from_utf8_lossy(&output.stderr),
+                file = %full_path.display(),
+                "0G artifact publisher failed; falling back to filesystem artifact storage"
+            );
+            return Ok(StoredArtifact {
+                backend: "filesystem_fallback".into(),
+                locator: full_path.to_string_lossy().to_string(),
+                checksum_sha256: checksum(bytes),
+                content_type: content_type.to_string(),
+                size_bytes: bytes.len() as i64,
+            });
         }
 
         let published: ZeroGPublishResult =
-            serde_json::from_slice(&output.stdout).context("0G publisher returned invalid JSON")?;
+            match serde_json::from_slice(&output.stdout) {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        file = %full_path.display(),
+                        "0G publisher returned invalid JSON; falling back to filesystem artifact storage"
+                    );
+                    return Ok(StoredArtifact {
+                        backend: "filesystem_fallback".into(),
+                        locator: full_path.to_string_lossy().to_string(),
+                        checksum_sha256: checksum(bytes),
+                        content_type: content_type.to_string(),
+                        size_bytes: bytes.len() as i64,
+                    });
+                }
+            };
 
         Ok(StoredArtifact {
             backend: "0g".into(),

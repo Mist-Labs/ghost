@@ -4,6 +4,7 @@ import {
   validateOperatorProtocolInput,
   type OperatorProtocolInput,
 } from "@/lib/server/operator-protocols";
+import { upsertProtocolInRegistry } from "@/lib/server/protocol-registry-sync";
 import { ensureTrustedOrigin } from "@/lib/server/request-security";
 
 export async function POST(request: Request) {
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
     }
 
     const protocol = await createOperatorProtocol(account.id, body);
+    await upsertProtocolInRegistry(protocol);
     return Response.json({ ok: true, protocol });
   } catch (error) {
     if ((error as { code?: string })?.code === "23505") {

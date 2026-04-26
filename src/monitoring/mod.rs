@@ -12,7 +12,10 @@ pub async fn run_monitoring_cycle(state: &crate::state::AppState) -> anyhow::Res
 
     {
         let mut conn = state.pool.get().await?;
-        crate::monitoring::report_ingestor::ingest_defillama_hacks(&mut conn).await?;
+        if let Err(error) = crate::monitoring::report_ingestor::ingest_defillama_hacks(&mut conn).await
+        {
+            tracing::warn!(error = %error, "hack report ingestion failed; continuing monitoring cycle");
+        }
     }
 
     for (protocol_id, protocol_name) in protocol_ids {

@@ -34,6 +34,7 @@ where
         .get_transaction_receipt(tx.hash)
         .await?
         .ok_or_else(|| anyhow!("transaction receipt not found"))?;
+    let native_balance_delta = native_balance_delta(provider, protocol, block_number.as_u64()).await?;
 
     if let Ok(fork) = ForkContext::spawn(config, block_number.as_u64().saturating_sub(1)).await {
         if let Ok(simulated_receipt) = fork.replay_transaction(tx).await {
@@ -46,15 +47,15 @@ where
             )
             .await
             {
-                return Ok(DrainResult {
+                return Ok(merge_native_balance_delta(DrainResult {
                     reason: result.reason.map(|reason| format!("fork_replay:{reason}")),
                     ..result
-                });
+                }, native_balance_delta));
             }
         }
     }
 
-    assess_drain_from_logs(
+    let result = assess_drain_from_logs(
         protocol,
         tx,
         &receipt.logs,
@@ -78,7 +79,9 @@ where
                 .await?)
         },
     )
-    .await
+    .await?;
+
+    Ok(merge_native_balance_delta(result, native_balance_delta))
 }
 
 async fn assess_drain_from_logs<
@@ -202,6 +205,61 @@ fn native_outflow(protocol: Address, tx: &Transaction) -> Option<U256> {
     (tx.from == protocol)
         .then_some(tx.value)
         .filter(|value| !value.is_zero())
+}
+
+async fn native_balance_delta<M: Middleware + Clone + 'static>(
+    provider: &M,
+    protocol: Address,
+    block_number: u64,
+) -> Result<Option<(f64, u128, String)>>
+where
+    <M as Middleware>::Error: 'static,
+{
+    let balance_before = provider
+        .get_balance(
+            protocol,
+            Some(BlockId::Number(block_number.saturating_sub(1).into())),
+        )
+        .await?;
+    if balance_before.is_zero() {
+        return Ok(None);
+    }
+
+    let balance_after = provider
+        .get_balance(protocol, Some(BlockId::Number(block_number.into())))
+        .await?;
+
+    if balance_after >= balance_before {
+        return Ok(None);
+    }
+
+    let loss = balance_before - balance_after;
+    let pct = ratio(loss, balance_before);
+    Ok(Some((
+        pct,
+        loss.as_u128(),
+        format!("native_balance_delta:{pct:.4}"),
+    )))
+}
+
+fn merge_native_balance_delta(
+    mut result: DrainResult,
+    native_delta: Option<(f64, u128, String)>,
+) -> DrainResult {
+    let Some((pct, absolute_loss, reason)) = native_delta else {
+        return result;
+    };
+
+    if pct > result.pct_drained {
+        result.pct_drained = pct;
+    }
+    result.absolute_loss = result.absolute_loss.saturating_add(absolute_loss);
+    result.confirmed |= pct >= 0.10;
+    result.reason = match result.reason.take() {
+        Some(existing) => Some(format!("{existing},{reason}")),
+        None => Some(reason),
+    };
+    result
 }
 
 fn ratio(numerator: U256, denominator: U256) -> f64 {
