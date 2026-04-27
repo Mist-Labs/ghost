@@ -1,29 +1,32 @@
-// SPDX-License-Identifier: MIT
-pragma solidity >=0.8.0;
+// SPDX-License-Identifier: MIT OR Apache-2.0
+pragma solidity >=0.8.13 <0.9.0;
 
+// 💬 ABOUT
+// Forge Std's default Test.
+
+// 🧩 MODULES
+import {console} from "./console.sol";
+import {console2} from "./console2.sol";
+import {safeconsole} from "./safeconsole.sol";
+import {StdAssertions} from "./StdAssertions.sol";
+import {StdChains} from "./StdChains.sol";
+import {StdCheats} from "./StdCheats.sol";
+import {StdConstants} from "./StdConstants.sol";
+import {stdError} from "./StdError.sol";
+import {StdInvariant} from "./StdInvariant.sol";
+import {stdJson} from "./StdJson.sol";
+import {stdMath} from "./StdMath.sol";
+import {StdStorage, stdStorage} from "./StdStorage.sol";
+import {StdStyle} from "./StdStyle.sol";
+import {stdToml} from "./StdToml.sol";
+import {StdUtils} from "./StdUtils.sol";
 import {Vm} from "./Vm.sol";
 
-abstract contract Test {
-    Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+// 📦 BOILERPLATE
+import {TestBase} from "./Base.sol";
 
-    function assertTrue(bool condition, string memory message) internal pure {
-        require(condition, message);
-    }
-
-    function assertEq(address lhs, address rhs, string memory message) internal pure {
-        require(lhs == rhs, message);
-    }
-
-    function assertEq(uint256 lhs, uint256 rhs, string memory message) internal pure {
-        require(lhs == rhs, message);
-    }
-
-    function assertEq(bool lhs, bool rhs, string memory message) internal pure {
-        require(lhs == rhs, message);
-    }
-
-    function assertEq(string memory lhs, string memory rhs, string memory message) internal pure {
-        require(keccak256(bytes(lhs)) == keccak256(bytes(rhs)), message);
-    }
+// ⭐️ TEST
+abstract contract Test is TestBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+    // Note: IS_TEST() must return true.
+    bool public IS_TEST = true;
 }
-
